@@ -4,15 +4,54 @@ IMPORTANT: This file was signed by Sparkle. Any modifications to this file requi
     <channel>
         <title>MoonlightEnhanced</title>
         <item>
-            <title>1.3.9-RC2</title>
-            <pubDate>Fri, 09 Oct 2026 01:51:31 +0800</pubDate>
-            <sparkle:version>1554</sparkle:version>
-            <sparkle:shortVersionString>1.3.9-rc.2</sparkle:shortVersionString>
+            <title>1.3.9-RC3</title>
+            <pubDate>Sun, 11 Oct 2026 14:52:48 +0800</pubDate>
+            <sparkle:version>1580</sparkle:version>
+            <sparkle:shortVersionString>1.3.9-rc.3</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>12.0</sparkle:minimumSystemVersion>
-            <description sparkle:format="markdown">## Moonlight for macOS Enhanced v1.3.9-rc.2
+            <description sparkle:format="markdown">## Moonlight for macOS Enhanced v1.3.9-rc.3
 
 此版本为原生架构重建前最后一个版本。
 This is the final release before the native architecture rebuild.
+
+### RC3 Updates | RC3 更新
+
+- 音频编码可选无损 PCM、AC3 与 E-AC3（`设置 → 音频与麦克风 → 音频编码`，需要 Foundation Sunshine）。主机不支持或声道布局超过 5.1 时回退到 Opus，并说明原因。
+  Added lossless PCM, AC3, and E-AC3 audio (`Settings → Audio &amp; Microphone → Audio Codec`, Foundation Sunshine required). Unsupported hosts and layouts above 5.1 fall back to Opus with a stated reason.
+- AC3 / E-AC3 可原样直通给支持的输出设备（如 HDMI 功放或电视），也可在本机解码。直通失败或中途更换设备时自动改为本机解码，串流不中断。
+  AC3 and E-AC3 can be passed through to capable output devices such as HDMI receivers and TVs, or decoded on the Mac. A failed passthrough or a device change falls back to local decoding without ending the stream.
+- 控制中心可直接切换音频输出设备，音量滑块拖动更顺滑。新增“静音时保持音频流”，避免安静一段时间后第一声被截断；输出设备未能启动时串流继续运行。
+  The control center can switch the audio output device, and its volume slider is smoother. A new “Keep Audio Stream Active During Silence” option prevents the first sound after silence from being cut off, and the stream keeps running when an output device fails to start.
+- 新增精确式触控板：把 Mac 触控板的手指触点交给 Windows，使用 Windows 自己的手势与滚动。提供“屏蔽 macOS 触控板指针事件”和“同时使用”两种方式；授予辅助功能权限后可在串流期间屏蔽 macOS 系统手势。DualSense 触控板也可以这样使用。
+  Added Precision Touchpad: the Mac trackpad's contacts are sent to Windows, which applies its own gestures and scrolling. It can either block macOS pointer events or work alongside them, and with Accessibility permission macOS system gestures are suppressed during a stream. The DualSense touchpad can be used the same way.
+- 新增“使用 macOS 输入法输入文字”：拼音等输入法在本机完成组字，确认后的文字直接发送到主机。
+  Added “Type Text with the macOS Input Method”: composition happens on the Mac and the committed text is sent to the host.
+- 按键映射新增“输入的字符”方式，适合 Dvorak、Colemak 等布局；补齐 ISO 与 JIS 键盘的额外按键，并修正 Apple ISO 键盘上位置互换的两个键。
+  Added a “Typed characters” key mapping mode for layouts such as Dvorak and Colemak, mapped the extra ISO and JIS keys, and corrected the two keys that Apple ISO keyboards swap.
+- 可以用手柄操作应用：浏览应用列表和设置、打开菜单、调整滑块与选择器、用屏幕键盘输入，并在串流中打开控制中心。新增可自定义的手柄快捷键，包括触控板快捷键。
+  The app can be driven with a controller: browse the app list and settings, open menus, adjust sliders and pickers, type with an on-screen keyboard, and open the control center during a stream. Added configurable controller shortcuts, including touchpad shortcuts.
+- 所选的主机控制器类型（Xbox 360、DualShock 4、DualSense）会在启动和恢复串流时告知主机。修正陀螺仪与加速度的方向、单位和上报频率；窗口失去焦点时不再让游戏持续转向。
+  The chosen host controller type (Xbox 360, DualShock 4, DualSense) is now declared to the host on launch and resume. Corrected the axes, units, and report rate of gyro and accelerometer data, and stopped games from continuing to turn after the window loses focus.
+- 配合 Foundation Sunshine，串流中调整码率、帧率和分辨率不再需要重新连接。新增自适应码率与串流前带宽探测（默认关闭），以及视频 FEC 偏好。
+  With Foundation Sunshine, bitrate, frame rate, and resolution can change during a stream without reconnecting. Added adaptive bitrate with a pre-stream bandwidth probe (off by default) and a video FEC preference.
+- 缩短开始串流的等待：在主机启动应用的同时建立连接，加载动画在首帧到达时消失；串流期间保持完整的调度优先级。
+  Shortened stream startup by building the connection while the host launches the app and clearing the loading indicator on the first frame; streams keep full scheduling priority while running.
+- 控制中心可在串流期间调整主机显示缩放，并可运行主机为当前应用配置的主机命令；主机右键菜单新增“休眠主机”。客户端不会在开始串流时改动主机的缩放。
+  The control center can change the host display scale during a stream and run the Host Commands configured for the current app; the host context menu gains “Sleep Host”. The client never changes the host's scale when a stream starts.
+- HDR：新增“动态 HDR 偏好”（自动、Dolby Vision、HDR10+、仅 HDR10），性能浮窗显示实际协商的格式与回退原因；主机中途开关 HDR 时画面随之切换，并自动上报显示器亮度。移除不可用的 HDR Vivid 选项，Dolby Vision 不再与 4:4:4 同时提供。
+  HDR: added a Dynamic HDR Preference (Automatic, Dolby Vision, HDR10+, HDR10 only), with the negotiated format and fallback reason shown in the performance overlay. The picture follows the host when HDR is toggled mid-stream, and display luminance is reported automatically. Removed the unavailable HDR Vivid rows; Dolby Vision is no longer offered together with 4:4:4.
+- 修正原生渲染器下 Dolby Vision 的起播，以及 Metal 渲染器 SDR 输出的色彩标记和 10-bit 范围计算。
+  Fixed Dolby Vision startup on the Native renderer, and the colour tagging and 10-bit range math of SDR output on the Metal renderer.
+- 修复断开串流时可能出现的崩溃。
+  Fixed a crash that could occur when a stream was disconnected.
+- 尝试修复 macOS 12 至 14.3 上开始串流时的崩溃：原生与兼容渲染器不再直接调用 macOS 14.4 起才提供的接口（[#26](https://github.com/skyhua0224/moonlight-macos-enhanced/issues/26)）。
+  Attempted to fix stream-start crashes on macOS 12 through 14.3: the Native and Compatibility renderers no longer call an interface that only exists from macOS 14.4 (#26).
+- 设置搜索可跳转到具体选项并高亮显示；修复 macOS 12–14 上分辨率选择器无法使用的问题。
+  Settings search now scrolls to the chosen option and highlights it; fixed the resolution pickers on macOS 12–14.
+- 日志查看器在日志量大时不再卡顿，可在串流窗口内直接打开；默认视图中的日志均提供中英文说明，并修复日志模式与等级选择不生效的问题。
+  The log viewer stays responsive with large logs and can be opened inside the stream window; entries in the default view are described in Chinese and English, and the log mode and level pickers now take effect.
+- 关于与更新页完成本地化，应用菜单中的“检查更新”与后台检查接入原生更新流程（[#55](https://github.com/skyhua0224/moonlight-macos-enhanced/pull/55)）。
+  Localized the About &amp; Updates page and connected the app menu's “Check for Updates” item and background checks to the native update flow (PR #55).
 
 ### RC2 Updates | RC2 更新
 
@@ -65,8 +104,8 @@ This is the final release before the native architecture rebuild.
 
 ### Release Candidate | 候选版本说明
 
-- 本候选版请从发布页手动下载安装；应用内自动更新渠道正在部署。
-  Download and install this candidate manually from the release page; the in-app update feed is being prepared.
+- 可在 `设置 → 关于与更新` 检查更新；如果没有收到更新提示，请从发布页手动下载安装。
+  Check for updates in `Settings → About &amp; Updates`; if no update is offered, download and install this candidate manually from the release page.
 
 - 这是预发布版本。欢迎通过对应 issue 反馈使用情况；仍然遇到同类问题时，请附上系统版本、主机版本、输入设备及日志。
   This is a prerelease. If an issue persists, include your OS, host version, input device, and logs in the corresponding report.
@@ -107,16 +146,14 @@ xattr -dr com.apple.quarantine /Applications/MoonlightEnhanced.app
   To open Terminal, press `⌘ Space`, type `Terminal`, and press `Enter`.
 
 ### Full Changelog | 完整变更
-- 对比 `v1.3.8` 与 `v1.3.9-rc.1`：[v1.3.8...v1.3.9-rc.1](https://github.com/skyhua0224/moonlight-macos-enhanced/compare/v1.3.8...v1.3.9-rc.1)
-  Compare `v1.3.8` and `v1.3.9-rc.1`: [v1.3.8...v1.3.9-rc.1](https://github.com/skyhua0224/moonlight-macos-enhanced/compare/v1.3.8...v1.3.9-rc.1)
+- 对比 `v1.3.9-rc.2` 与 `v1.3.9-rc.3`：[v1.3.9-rc.2...v1.3.9-rc.3](https://github.com/skyhua0224/moonlight-macos-enhanced/compare/v1.3.9-rc.2...v1.3.9-rc.3)
+  Compare `v1.3.9-rc.2` and `v1.3.9-rc.3`: [v1.3.9-rc.2...v1.3.9-rc.3](https://github.com/skyhua0224/moonlight-macos-enhanced/compare/v1.3.9-rc.2...v1.3.9-rc.3)
 
-- 对比 `v1.3.9-rc.1` 与 `v1.3.9-rc.2`：[v1.3.9-rc.1...v1.3.9-rc.2](https://github.com/skyhua0224/moonlight-macos-enhanced/compare/v1.3.9-rc.1...v1.3.9-rc.2)
-  Compare RC1 and RC2: [v1.3.9-rc.1...v1.3.9-rc.2](https://github.com/skyhua0224/moonlight-macos-enhanced/compare/v1.3.9-rc.1...v1.3.9-rc.2)
 </description>
-            <enclosure url="https://github.com/skyhua0224/moonlight-macos-enhanced/releases/download/v1.3.9-rc.2/Moonlight-macOS-Enhanced-universal.dmg" length="12186375" type="application/octet-stream" sparkle:edSignature="GQF0Rplun8CcWMU+lbR7fhHqiq+aINxci/pVEsZIoOoheBxWSz6aMZDo9ugdrNwVhzaIwUw3Y6/fUIYYc09WDA=="></enclosure>
+            <enclosure url="https://github.com/skyhua0224/moonlight-macos-enhanced/releases/download/v1.3.9-rc.3/Moonlight-macOS-Enhanced-universal.dmg" length="13537679" type="application/octet-stream" sparkle:edSignature="+8sqd2IZ9+qnVbDBbIc0APjXGkBbTnYXge6B8u69mxZd5M2YnyKHAC1lbCTMDuOwkGf4csLPuSM0ZbpI3+kgCQ=="></enclosure>
         </item>
     </channel>
 </rss><!-- sparkle-signatures:
-edSignature: i/vrjhp1afCGACGYY331AEvZdXxYDFA5R32Imw6+KpZWZfU7c5pwhLwufIF6n6AtJarV9zszvJST9PKonDMpCQ==
-length: 12577
+edSignature: L42NDsCZfvyQZvkLNpBS44dfC0BUOssScksjNIbHpvd2XE3qRC+p/9GJo9pXhR1L335hAVSWuQma9FnjWJ+QAA==
+length: 19664
 -->
