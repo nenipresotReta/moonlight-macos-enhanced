@@ -4,15 +4,38 @@ IMPORTANT: This file was signed by Sparkle. Any modifications to this file requi
     <channel>
         <title>MoonlightEnhanced</title>
         <item>
-            <title>1.3.9-RC3</title>
-            <pubDate>Sun, 11 Oct 2026 14:52:48 +0800</pubDate>
-            <sparkle:version>1580</sparkle:version>
-            <sparkle:shortVersionString>1.3.9-rc.3</sparkle:shortVersionString>
+            <title>1.3.9-RC4</title>
+            <pubDate>Mon, 12 Oct 2026 14:17:57 +0800</pubDate>
+            <sparkle:version>1585</sparkle:version>
+            <sparkle:shortVersionString>1.3.9-rc.4</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>12.0</sparkle:minimumSystemVersion>
-            <description sparkle:format="markdown">## Moonlight for macOS Enhanced v1.3.9-rc.3
+            <description sparkle:format="markdown">## Moonlight for macOS Enhanced v1.3.9-rc.4
 
 此版本为原生架构重建前最后一个版本。
 This is the final release before the native architecture rebuild.
+
+### RC4 Updates | RC4 更新
+
+- 音效增强的均衡器改为参数均衡器：可选 12 段、24 段或自由频段（峰值、低架、高架、低通、高通），直接拖动曲线上的圆点调整，串流中调整立即生效，曲线背后显示实时频谱。
+  The equalizer in Audio Enhancement is now parametric: 12 bands, 24 bands, or custom bands (peak, low shelf, high shelf, low pass, high pass). Drag the points on the curve; changes apply at once during a stream, with a live spectrum behind the curve.
+- 新增预设 EQ：按设备和按音色的通用预设，以及收录 6000 多款耳机实测校正的设备库（数据来自 AutoEq 项目），可按型号搜索。均衡设置可以从文件导入、从剪贴板粘贴、导出，并保存为自己的预设。
+  Added Preset EQ: general presets by kind of device and by sound, and a library of measured corrections for more than 6,000 headphones (data from the AutoEq project), searchable by model. Equalizer settings can be imported from a file, pasted from the clipboard, exported, and saved as your own presets.
+- 新增空间音频方式（自动、宽声场立体声、关闭）：使用耳机时，5.1、7.1 和 7.1.4 串流按声道方位做双耳渲染。音效增强的输出加入限幅，避免均衡或增益后削波。
+  Added a Spatial Audio choice (Automatic, Wide Stereo, Off): on headphones, 5.1, 7.1, and 7.1.4 streams are rendered binaurally by channel position. The Audio Enhancement output now has a limiter, so equalizer and gain changes do not clip.
+- 可以为串流单独选择输出设备（`设置 → 音频与麦克风 → 输出设备`），不改变系统输出；系统输出被均衡器类应用接管时，仍可把声音或杜比码流直接送到电视或功放。所选设备不接受杜比码流时会说明原因并改在本机解码。
+  The stream can have an output device of its own (`Settings → Audio &amp; Microphone → Output Device`) without changing the system output, so sound or a Dolby bitstream can still go straight to a TV or receiver when an equalizer app has taken over the system output. If the chosen device does not accept the bitstream, the app says so and decodes on the Mac.
+- 没有 AV1 硬件解码的 Mac 现在可以选择 AV1，使用软件解码（dav1d）。耗电明显更高，大致能跟上 1080p 120 帧或 1440p 60 帧；HDR、10-bit 和 4:4:4 仍需要硬件解码，没有特别需要时建议继续使用 H.265。
+  Macs without an AV1 hardware decoder can now choose AV1, decoded in software (dav1d). It uses noticeably more power and keeps up with roughly 1080p at 120 fps or 1440p at 60 fps; HDR, 10-bit, and 4:4:4 still need hardware decoding, so H.265 remains the better choice unless AV1 is needed.
+- 主机没有送出 7.1.4 音频时（常见于主机的音频设备不支持 12 声道），几秒内给出提示并自动改用 7.1 重新连接，之后该主机直接使用 7.1；音频设置中可以“重试 7.1.4”。需要 Foundation Sunshine 并开启“静音时保持音频流”。
+  When the host sends no 7.1.4 audio (usually because its audio device does not accept 12 channels), the app says so within seconds and reconnects with 7.1, which that host then uses from the start; “Retry 7.1.4” in the audio settings asks for it again. Requires Foundation Sunshine with “Keep Audio Stream Active During Silence” on.
+- 设置窗口打开更快：窗口在两次打开之间保留，各页面在窗口打开期间提前准备。
+  The settings window opens faster: it is kept between uses, and its pages are prepared ahead while it is open.
+- 修复窗口模式下点击串流画面左下角会打开控制中心的问题（[#58](https://github.com/skyhua0224/moonlight-macos-enhanced/issues/58)）。
+  Fixed clicks in the lower-left corner of a windowed stream opening the control center (#58).
+- 修复有两个以上音频输入设备的 Mac（例如装有虚拟音频设备，或接了带麦克风的耳机）在串流开始或结束时可能出现的崩溃。
+  Fixed a crash that could occur as a stream started or ended on Macs with two or more audio input devices, such as a virtual audio device or a headset with a microphone.
+- 所选麦克风被拔出后不再被清除：重新接上即恢复使用，期间串流使用系统默认麦克风。
+  A chosen microphone is no longer forgotten when it is unplugged: it is used again once it is back, and the stream uses the system default meanwhile.
 
 ### RC3 Updates | RC3 更新
 
@@ -146,14 +169,14 @@ xattr -dr com.apple.quarantine /Applications/MoonlightEnhanced.app
   To open Terminal, press `⌘ Space`, type `Terminal`, and press `Enter`.
 
 ### Full Changelog | 完整变更
-- 对比 `v1.3.9-rc.2` 与 `v1.3.9-rc.3`：[v1.3.9-rc.2...v1.3.9-rc.3](https://github.com/skyhua0224/moonlight-macos-enhanced/compare/v1.3.9-rc.2...v1.3.9-rc.3)
-  Compare `v1.3.9-rc.2` and `v1.3.9-rc.3`: [v1.3.9-rc.2...v1.3.9-rc.3](https://github.com/skyhua0224/moonlight-macos-enhanced/compare/v1.3.9-rc.2...v1.3.9-rc.3)
+- 对比 `v1.3.9-rc.3` 与 `v1.3.9-rc.4`：[v1.3.9-rc.3...v1.3.9-rc.4](https://github.com/skyhua0224/moonlight-macos-enhanced/compare/v1.3.9-rc.3...v1.3.9-rc.4)
+  Compare `v1.3.9-rc.3` and `v1.3.9-rc.4`: [v1.3.9-rc.3...v1.3.9-rc.4](https://github.com/skyhua0224/moonlight-macos-enhanced/compare/v1.3.9-rc.3...v1.3.9-rc.4)
 
 </description>
-            <enclosure url="https://github.com/skyhua0224/moonlight-macos-enhanced/releases/download/v1.3.9-rc.3/Moonlight-macOS-Enhanced-universal.dmg" length="13537679" type="application/octet-stream" sparkle:edSignature="+8sqd2IZ9+qnVbDBbIc0APjXGkBbTnYXge6B8u69mxZd5M2YnyKHAC1lbCTMDuOwkGf4csLPuSM0ZbpI3+kgCQ=="></enclosure>
+            <enclosure url="https://github.com/skyhua0224/moonlight-macos-enhanced/releases/download/v1.3.9-rc.4/Moonlight-macOS-Enhanced-universal.dmg" length="15661479" type="application/octet-stream" sparkle:edSignature="pWuAEc1SngpMcG5abSOVL4f4wOM7DmpKXMQ6uIGOQuIHpibiWL0bUk6eMScvVJBWU/WFLBWH99baWhBy07omCg=="></enclosure>
         </item>
     </channel>
 </rss><!-- sparkle-signatures:
-edSignature: L42NDsCZfvyQZvkLNpBS44dfC0BUOssScksjNIbHpvd2XE3qRC+p/9GJo9pXhR1L335hAVSWuQma9FnjWJ+QAA==
-length: 19664
+edSignature: b6HQSVitnEgq/VduSZ1p7rzwnn1l4E3hYIYTZLeXz6RGDWrPHcnGFGp8pyMqPfDMJ+I4uGWuvvEDiwCQEINXBA==
+length: 24159
 -->
