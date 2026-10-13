@@ -697,7 +697,7 @@ private struct MouseTuningSettingsSection: View {
         .controllerPicker(
           selection: $settingsModel.coreHIDMaxMouseReportRate, options: SettingsModel.coreHIDMaxMouseReportRates,
           title: { SettingsModel.coreHIDMaxMouseReportRateLabel($0) })
-        .frame(width: 190)
+        .frame(width: 190, alignment: .trailing)
         .disabled(!coreHID)
       }
       SettingsChoiceRow(title: "Touchscreen Mode", selection: $settingsModel.selectedTouchscreenMode, options: SettingsModel.touchscreenModes)
