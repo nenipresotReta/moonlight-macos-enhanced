@@ -631,6 +631,16 @@ static NSString * const MLSunshinePerAppTopologyDefaultsPrefix = @"Moonlight.Sun
     StreamViewController *streamVC = segue.destinationController;
     streamVC.app = self.runningApp;
     streamVC.delegate = self;
+    // Pending overrides belong to whichever app's context menu opened last;
+    // every launch must use the launched app's own saved display choice.
+    self.sunshineOverrideApp = self.runningApp;
+    [self loadPersistedSunshineTopologyForCurrentApp];
+    Log(LOG_I, @"[sunshine] Launch display topology: app=%@ display=%@ useVdd=%@ screenMode=%@",
+        self.runningApp.id ?: @"(unknown)",
+        self.hasPendingSessionSunshineTargetDisplayOverride
+            ? (self.pendingSessionSunshineTargetDisplayNameOverride ?: @"(host default)") : @"(follow settings)",
+        self.pendingSessionSunshineUseVirtualDisplayOverride ?: @"(follow settings)",
+        self.pendingSessionSunshineScreenModeOverride ?: @"(follow settings)");
     streamVC.hasSessionSunshineTargetDisplayOverride = self.hasPendingSessionSunshineTargetDisplayOverride;
     streamVC.sessionSunshineTargetDisplayNameOverride = self.pendingSessionSunshineTargetDisplayNameOverride;
     streamVC.sessionSunshineScreenModeOverride = self.pendingSessionSunshineScreenModeOverride;
