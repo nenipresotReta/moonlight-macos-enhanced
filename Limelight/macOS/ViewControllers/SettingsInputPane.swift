@@ -254,8 +254,28 @@ private struct KeyboardMouseSettingsSection: View {
         }
       }
 
-      ToggleCell(title: "Capture System Shortcuts", boolBinding: $settingsModel.captureSystemShortcuts)
-      ToggleCell(title: "Absolute Mouse Mode", boolBinding: $settingsModel.absoluteMouseMode)
+      SettingsRow(title: "Capture System Shortcuts") {
+        HStack(spacing: 6) {
+          if settingsModel.captureSystemShortcuts && !accessibility.isTrusted {
+            InfoHintButton(
+              hintKey: "Capture System Shortcuts Permission Hint",
+              systemImage: "exclamationmark.triangle.fill", tint: .orange)
+          }
+          InfoHintButton(hintKey: "Capture System Shortcuts Hint")
+          Toggle("", isOn: $settingsModel.captureSystemShortcuts)
+            .labelsHidden()
+            .toggleStyle(.switch)
+            .focusable()
+            .controlSize(.small)
+        }
+      }
+      .onChange(of: settingsModel.captureSystemShortcuts) { enabled in
+        if enabled {
+          accessibility.offerPermissionIfNeeded(
+            titleKey: "Capture System Shortcuts Permission Title",
+            messageKey: "Capture System Shortcuts Permission Message")
+        }
+      }
       ToggleCell(title: "Swap Mouse Buttons", boolBinding: $settingsModel.swapMouseButtons)
       ToggleCell(title: "Reverse Scroll Direction", boolBinding: $settingsModel.reverseScrollDirection)
       SettingsRow(title: "Precision Touchpad") {
@@ -280,7 +300,9 @@ private struct KeyboardMouseSettingsSection: View {
       }
       .onChange(of: settingsModel.hostPrecisionTouchpadMode) { mode in
         if mode != 0 {
-          accessibility.offerPermissionIfNeeded()
+          accessibility.offerPermissionIfNeeded(
+            titleKey: "Precision Touchpad Gesture Permission Title",
+            messageKey: "Precision Touchpad Gesture Permission Message")
         }
       }
       ToggleCell(title: "Type Text with the macOS Input Method", hintKey: "Type Text with the macOS Input Method Hint", boolBinding: $settingsModel.imeTextInput)
@@ -313,9 +335,10 @@ private struct KeyboardMouseSettingsSection: View {
 }
 
 /// Accessibility access lets the stream swallow macOS system gestures (Mission Control, Spaces swipes)
-/// while the precision touchpad sends every finger to the host. Without it the touchpad still works.
+/// and system shortcuts (⌘Tab, ⌘Space) so they reach the host. Without it both features degrade to
+/// the normal behavior.
 @MainActor
-private final class AccessibilityGesturePermission: ObservableObject {
+final class AccessibilityGesturePermission: ObservableObject {
   @Published var isTrusted = MLSystemGestureBlocker.isAccessibilityTrusted()
   private var activeObserver: NSObjectProtocol?
   private var didPromptThisSession = false
@@ -338,14 +361,27 @@ private final class AccessibilityGesturePermission: ObservableObject {
     isTrusted = MLSystemGestureBlocker.isAccessibilityTrusted()
   }
 
-  func offerPermissionIfNeeded() {
+  /// The first request shows the system prompt (which also lists the app in the pane);
+  /// later requests open the Accessibility pane directly.
+  func request() {
+    refresh()
+    guard !isTrusted else { return }
+    if didPromptThisSession {
+      MLSystemGestureBlocker.openAccessibilitySettings()
+    } else {
+      didPromptThisSession = true
+      _ = MLSystemGestureBlocker.requestAccessibilityPermission()
+    }
+  }
+
+  func offerPermissionIfNeeded(titleKey: String, messageKey: String) {
     refresh()
     guard !isTrusted else { return }
     let language = LanguageManager.shared
     let alert = NSAlert()
     alert.alertStyle = .informational
-    alert.messageText = language.localize("Precision Touchpad Gesture Permission Title")
-    alert.informativeText = language.localize("Precision Touchpad Gesture Permission Message")
+    alert.messageText = language.localize(titleKey)
+    alert.informativeText = language.localize(messageKey)
     alert.addButton(withTitle: language.localize("Open Accessibility Settings"))
     alert.addButton(withTitle: language.localize("Not Now"))
     guard alert.runModal() == .alertFirstButtonReturn else { return }

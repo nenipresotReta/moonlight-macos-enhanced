@@ -117,6 +117,7 @@ private struct WelcomePermissionsView: View {
   @ObservedObject private var microphoneManager = MicrophoneManager.shared
   @ObservedObject private var inputMonitoringManager = InputMonitoringPermissionManager.sharedManager
   @ObservedObject private var awdlManager = AwdlHelperManager.sharedManager
+  @StateObject private var accessibility = AccessibilityGesturePermission()
   let onContinue: () -> Void
 
   private var microphoneStatus: AVAuthorizationStatus {
@@ -174,6 +175,17 @@ private struct WelcomePermissionsView: View {
             actionTitle: microphoneActionTitle,
             action: microphoneAction
           )
+
+          // Optional: only system shortcut capture and the precision touchpad gesture block use it,
+          // so it never makes the welcome window appear on its own.
+          permissionRow(
+            title: "Accessibility",
+            subtitle: "Welcome Accessibility detail",
+            stateLabel: accessibility.isTrusted ? "Granted" : "Optional",
+            isGranted: accessibility.isTrusted,
+            actionTitle: accessibility.isTrusted ? nil : "Request",
+            action: accessibility.isTrusted ? nil : { accessibility.request() }
+          )
         }
         .padding(.vertical, 8)
       }
@@ -192,6 +204,7 @@ private struct WelcomePermissionsView: View {
       microphoneManager.refreshPermissionStatus()
       inputMonitoringManager.refreshAuthorizationStatus()
       awdlManager.refreshAuthorizationStatus()
+      accessibility.refresh()
     }
   }
 

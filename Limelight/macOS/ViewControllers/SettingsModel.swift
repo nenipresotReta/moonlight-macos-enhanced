@@ -1127,12 +1127,6 @@ class SettingsModel: ObservableObject {
   }
 
   // Input Settings
-  @Published var absoluteMouseMode: Bool {
-    didSet {
-      guard !isLoading else { return }
-      saveSettings()
-    }
-  }
   @Published var swapMouseButtons: Bool {
     didSet {
       guard !isLoading else { return }
@@ -1729,7 +1723,6 @@ class SettingsModel: ObservableObject {
     selectedFreeMouseMotionMode = Self.defaultFreeMouseMotionMode
 
     quitAppAfterStream = Self.defaultQuitAppAfterStream
-    absoluteMouseMode = Self.defaultAbsoluteMouseMode
     swapMouseButtons = Self.defaultSwapMouseButtons
     reverseScrollDirection = Self.defaultReverseScrollDirection
     pointerSensitivity = Self.defaultPointerSensitivity

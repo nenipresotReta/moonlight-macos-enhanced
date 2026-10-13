@@ -308,7 +308,6 @@
 
 /* Input Settings */
 "Mouse" = "Mouse";
-"Absolute Mouse Mode" = "Absolute Mouse Mode (Remote Desktop)";
 "Swap Mouse Buttons" = "Swap Mouse Buttons";
 "Reverse Scroll Direction" = "Reverse Scroll Direction";
 "Touchscreen Mode" = "Touchscreen Mode";
@@ -1242,6 +1241,13 @@
 "Precision Touchpad Block" = "On – block macOS trackpad pointer events";
 "Precision Touchpad Both" = "On – use both";
 "Precision Touchpad Gesture Permission Hint" = "Accessibility access is not granted, so macOS gestures such as Mission Control and swiping between Spaces still act on this Mac while streaming. Grant Moonlight access under Privacy & Security > Accessibility, or turn those gestures off in System Settings > Trackpad.";
+"Optional" = "Optional";
+"Accessibility" = "Accessibility";
+"Welcome Accessibility detail" = "Optional. Lets Moonlight send macOS shortcuts such as ⌘Tab and ⌘Space to the host, and keep trackpad gestures from acting on this Mac while the precision touchpad is on.";
+"Capture System Shortcuts Hint" = "While the stream has the mouse and keyboard, shortcuts macOS normally keeps for itself (⌘Tab, ⌘`, ⌘Space, ⌃Space, ⌃ arrow keys, screenshots, function keys) are sent to the host instead. ⌘ is the Win key unless the keyboard translation says otherwise, so ⌘Tab opens Task View. Force Quit (⌥⌘Esc) and Lock Screen (⌃⌘Q) always stay with macOS. Release the mouse to use your Mac's shortcuts again.";
+"Capture System Shortcuts Permission Hint" = "Accessibility access is not granted, so macOS still handles its own shortcuts such as ⌘Tab while streaming. Grant Moonlight access under Privacy & Security > Accessibility.";
+"Capture System Shortcuts Permission Title" = "Allow Moonlight to capture system shortcuts?";
+"Capture System Shortcuts Permission Message" = "To send shortcuts such as ⌘Tab and ⌘Space to the host, macOS requires Accessibility access for Moonlight. You can grant it now or later in System Settings > Privacy & Security > Accessibility. Without it, macOS keeps handling those shortcuts.";
 "Precision Touchpad Gesture Permission Title" = "Block macOS gestures while streaming?";
 "Precision Touchpad Gesture Permission Message" = "Moonlight can keep three- and four-finger macOS gestures, such as Mission Control and swiping between Spaces, from also acting on this Mac while the trackpad is sent to Windows. This needs Accessibility access. Without it the precision touchpad still works, but those gestures also trigger on the Mac.";
 "Open Accessibility Settings" = "Open Accessibility Settings";
