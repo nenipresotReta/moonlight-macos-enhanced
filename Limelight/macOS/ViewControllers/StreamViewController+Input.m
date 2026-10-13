@@ -53,6 +53,8 @@ static const NSUInteger MLMaxImeCommitLength = 4096;
         });
         return;
     }
+    // Same lifetime as the gesture block: only while the stream owns the input.
+    [self refreshSystemShortcutCaptureWithReason:reason];
 
     NSInteger mode = self.precisionTouchpadModeForGestureBlock;
     NSWindow *window = self.view.window;
@@ -84,6 +86,43 @@ static const NSUInteger MLMaxImeCommitLength = 4096;
         self.systemGestureBlocker = [[MLSystemGestureBlocker alloc] init];
     }
     [self.systemGestureBlocker installWithReason:reason];
+}
+
+#pragma mark - System shortcut capture
+
+- (BOOL)streamOwnsInputForSystemCapture {
+    NSWindow *window = self.view.window;
+    return self.isMouseCaptured &&
+           !self.stopStreamInProgress &&
+           !self.reconnectInProgress &&
+           !self.edgeMenuTemporaryReleaseActive &&
+           !self.edgeMenuMenuVisible &&
+           window != nil && window.isKeyWindow && NSApp.isActive;
+}
+
+- (void)refreshSystemShortcutCaptureWithReason:(NSString *)reason {
+    BOOL wanted = [SettingsClass captureSystemShortcutsFor:self.app.host.uuid] &&
+                  [self streamOwnsInputForSystemCapture];
+    if (!wanted) {
+        self.systemShortcutCaptureUnavailableLogged = NO;
+        [self.systemShortcutCapture removeWithReason:reason];
+        return;
+    }
+    if (self.systemShortcutCapture.installed) {
+        return;
+    }
+    if (![MLSystemGestureBlocker isAccessibilityTrusted]) {
+        // Without the permission macOS keeps its shortcuts; everything else is unchanged.
+        if (!self.systemShortcutCaptureUnavailableLogged) {
+            self.systemShortcutCaptureUnavailableLogged = YES;
+            Log(LOG_I, @"[keyboard] system shortcut tap not installed reason=%@ accessibility=0", reason);
+        }
+        return;
+    }
+    if (self.systemShortcutCapture == nil) {
+        self.systemShortcutCapture = [[MLSystemShortcutCapture alloc] init];
+    }
+    [self.systemShortcutCapture installWithReason:reason];
 }
 
 #pragma mark - Input method text

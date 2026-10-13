@@ -23,6 +23,7 @@
 #import "VideoDecoderRenderer.h"
 #import "HIDSupport.h"
 #import "MLSystemGestureBlocker.h"
+#import "MLSystemShortcutCapture.h"
 #import "MoonlightEnhanced-Swift.h"
 #import "Logger.h"
 
@@ -491,6 +492,8 @@ static const NSTimeInterval MLStatsOverlayRefreshIntervalSec = 0.5;
 
 // Dock gesture filter for the precision touchpad (see StreamViewController+Input.m).
 @property (nonatomic, strong) MLSystemGestureBlocker *systemGestureBlocker;
+@property (nonatomic, strong) MLSystemShortcutCapture *systemShortcutCapture;
+@property (nonatomic) BOOL systemShortcutCaptureUnavailableLogged;
 @property (nonatomic) NSInteger precisionTouchpadModeForGestureBlock;
 @property (nonatomic) BOOL systemGestureBlockUnavailableLogged;
 
@@ -894,6 +897,7 @@ static const NSTimeInterval MLStatsOverlayRefreshIntervalSec = 0.5;
 - (void)configurePrecisionTouchpadInput;
 /// Installs or removes the macOS system gesture filter so it only runs while the stream owns the trackpad.
 - (void)refreshSystemGestureBlockWithReason:(NSString *)reason;
+- (void)refreshSystemShortcutCaptureWithReason:(NSString *)reason;
 - (void)refreshTextInputConfiguration;
 - (BOOL)routeKeyDownToInputMethod:(NSEvent *)event;
 - (BOOL)shouldSwallowKeyUpForInputMethod:(NSEvent *)event;
