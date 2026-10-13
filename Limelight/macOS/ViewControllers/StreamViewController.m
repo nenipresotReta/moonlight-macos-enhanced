@@ -1105,6 +1105,7 @@ highFreqMotor:(unsigned short)highFreqMotor {
     // Never leave the system gesture filter running once the stream is stopping or gone.
     self.precisionTouchpadModeForGestureBlock = 0;
     [self.systemGestureBlocker removeWithReason:@"stream-teardown"];
+    [self.systemShortcutCapture removeWithReason:@"stream-teardown"];
 
     if (self.windowDidExitFullScreenNotification != nil) {
         [defaultCenter removeObserver:self.windowDidExitFullScreenNotification];

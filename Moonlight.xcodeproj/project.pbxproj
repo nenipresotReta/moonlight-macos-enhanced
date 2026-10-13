@@ -123,6 +123,7 @@
 				Input/MLDualSenseTouchpad.m,
 				Input/MLPrecisionTouchpad.m,
 				Input/MLSystemGestureBlocker.m,
+				Input/MLSystemShortcutCapture.m,
 				Input/HIDSupport.m,
 				"Input/HIDSupport+Pointer.m",
 				"Input/HIDSupport+Rumble.m",
