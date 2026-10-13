@@ -23,6 +23,12 @@ NS_ASSUME_NONNULL_BEGIN
 /// Opens the Accessibility pane of System Settings.
 + (void)openAccessibilitySettings;
 
+/// Local builds and updates change the app's code signature, so an Accessibility
+/// switch granted to an earlier build no longer applies and macOS will not ask
+/// again. Clears this app's stale entry, then shows the system prompt for the
+/// running build. Returns the current trust state.
++ (BOOL)resetAndRequestAccessibilityPermission;
+
 /// YES while the event tap is installed.
 @property (nonatomic, readonly) BOOL installed;
 

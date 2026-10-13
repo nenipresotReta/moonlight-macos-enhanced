@@ -580,6 +580,21 @@ struct KeyboardTranslationRulesView: View {
         }
       }
 
+      HStack(alignment: .top, spacing: 8) {
+        Image(systemName: "exclamationmark.triangle.fill")
+          .foregroundColor(.orange)
+        Text(languageManager.localize("Translation Rules Capture Warning"))
+          .font(.footnote)
+          .foregroundColor(.primary)
+          .fixedSize(horizontal: false, vertical: true)
+      }
+      .padding(10)
+      .frame(maxWidth: .infinity, alignment: .leading)
+      .background(
+        RoundedRectangle(cornerRadius: 10, style: .continuous)
+          .fill(Color.orange.opacity(0.12))
+      )
+
       if settingsModel.keyboardTranslationRules.isEmpty {
         RoundedRectangle(cornerRadius: 12, style: .continuous)
           .fill(Color(NSColor.controlBackgroundColor))
@@ -606,6 +621,8 @@ struct KeyboardTranslationRulesView: View {
           ForEach(settingsModel.keyboardTranslationRules) { rule in
             KeyboardTranslationRuleCard(
               rule: rule,
+              needsCaptureWarning: KeyboardTranslationProfile.isMacSystemShortcut(rule.trigger)
+                && !settingsModel.captureSystemShortcuts,
               onEdit: {
                 editingRequest = KeyboardTranslationEditorRequest(rule: rule)
               },
@@ -626,12 +643,20 @@ struct KeyboardTranslationRulesView: View {
 private struct KeyboardTranslationRuleCard: View {
   @ObservedObject var languageManager = LanguageManager.shared
   let rule: KeyboardTranslationRule
+  var needsCaptureWarning = false
   let onEdit: () -> Void
   let onDelete: () -> Void
 
   var body: some View {
     VStack(alignment: .leading, spacing: 12) {
-      ShortcutTokenRowView(tokens: KeyboardTranslationProfile.displayTokens(forTrigger: rule.trigger))
+      HStack(spacing: 6) {
+        ShortcutTokenRowView(tokens: KeyboardTranslationProfile.displayTokens(forTrigger: rule.trigger))
+        if needsCaptureWarning {
+          Image(systemName: "exclamationmark.triangle.fill")
+            .foregroundColor(.orange)
+            .help(languageManager.localize("Translation Rule Needs Capture"))
+        }
+      }
 
       HStack(alignment: .center, spacing: 8) {
         Image(systemName: "arrow.right")
@@ -690,6 +715,7 @@ private struct KeyboardTranslationRuleEditorSheet: View {
   @SwiftUI.State private var captureTarget: CaptureTarget?
   @SwiftUI.State private var eventMonitor: Any?
   @SwiftUI.State private var errorKey: String?
+  @SwiftUI.State private var recordingCapture: MLSystemShortcutCapture?
 
   init(settingsModel: SettingsModel, rule: KeyboardTranslationRule?) {
     _settingsModel = ObservedObject(wrappedValue: settingsModel)
@@ -734,6 +760,18 @@ private struct KeyboardTranslationRuleEditorSheet: View {
           isCapturing: captureTarget == .trigger)
       }
       .controllerButtonStyle(.plain)
+
+      if KeyboardTranslationProfile.isMacSystemShortcut(triggerShortcut) {
+        Label(
+          languageManager.localize(
+            settingsModel.captureSystemShortcuts
+              ? "Translation Rule System Shortcut Warning" : "Shortcut needs system shortcut capture"),
+          systemImage: "exclamationmark.triangle.fill"
+        )
+        .font(.footnote)
+        .foregroundColor(.orange)
+        .fixedSize(horizontal: false, vertical: true)
+      }
 
       VStack(alignment: .leading, spacing: 8) {
         Text(languageManager.localize("Action Type"))
@@ -807,7 +845,26 @@ private struct KeyboardTranslationRuleEditorSheet: View {
     .padding(20)
     .frame(width: 460)
     .onAppear(perform: installMonitor)
-    .onDisappear(perform: removeMonitor)
+    .onDisappear {
+      removeMonitor()
+      updateRecordingCapture(recording: false)
+    }
+    .onChange(of: captureTarget) { target in
+      updateRecordingCapture(recording: target != nil)
+    }
+  }
+
+  /// macOS takes shortcuts such as ⌘Tab before the app sees them; while recording, the
+  /// same capture the stream uses hands them to the recorder instead.
+  private func updateRecordingCapture(recording: Bool) {
+    if recording && settingsModel.captureSystemShortcuts && MLSystemGestureBlocker.isAccessibilityTrusted() {
+      if recordingCapture == nil {
+        recordingCapture = MLSystemShortcutCapture()
+      }
+      recordingCapture?.install(withReason: "translation-rule-recording")
+    } else {
+      recordingCapture?.remove(withReason: "translation-rule-recording-ended")
+    }
   }
 
   @ViewBuilder
@@ -888,6 +945,10 @@ private struct KeyboardTranslationRuleEditorSheet: View {
       streamShortcuts: settingsModel.streamShortcuts)
     {
       self.errorKey = errorKey
+      return
+    }
+    if KeyboardTranslationProfile.isMacSystemShortcut(triggerShortcut) && !settingsModel.captureSystemShortcuts {
+      self.errorKey = "Shortcut needs system shortcut capture"
       return
     }
 

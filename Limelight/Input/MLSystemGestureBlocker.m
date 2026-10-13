@@ -79,6 +79,28 @@ static CGEventRef MLSystemGestureTapCallback(CGEventTapProxy proxy, CGEventType 
     return AXIsProcessTrustedWithOptions((__bridge CFDictionaryRef)options);
 }
 
++ (BOOL)resetAndRequestAccessibilityPermission {
+    if ([self isAccessibilityTrusted]) {
+        return YES;
+    }
+    NSString *bundleId = NSBundle.mainBundle.bundleIdentifier;
+    if (bundleId.length > 0) {
+        NSTask *task = [[NSTask alloc] init];
+        task.executableURL = [NSURL fileURLWithPath:@"/usr/bin/tccutil"];
+        task.arguments = @[ @"reset", @"Accessibility", bundleId ];
+        task.standardOutput = [NSFileHandle fileHandleWithNullDevice];
+        task.standardError = [NSFileHandle fileHandleWithNullDevice];
+        NSError *error = nil;
+        if ([task launchAndReturnError:&error]) {
+            [task waitUntilExit];
+            Log(LOG_I, @"[permissions] reset stale Accessibility entry status=%d", task.terminationStatus);
+        } else {
+            Log(LOG_W, @"[permissions] could not reset Accessibility entry: %@", error.localizedDescription);
+        }
+    }
+    return [self requestAccessibilityPermission];
+}
+
 + (void)openAccessibilitySettings {
     NSURL *url = [NSURL URLWithString:@"x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility"];
     if (url == nil || ![[NSWorkspace sharedWorkspace] openURL:url]) {

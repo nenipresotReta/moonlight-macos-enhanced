@@ -21,6 +21,7 @@
 #import "Logger.h"
 #import "LogBuffer.h"
 #import "MLSystemGestureBlocker.h"
+#import "MLSystemShortcutCapture.h"
 #import "MLAudioBitstreamOutput.h"
 
 #include "../modules/controller-feedback/ControllerShortcut.h"
