@@ -156,6 +156,7 @@
 - (KeyboardCompatibilityMode)keyboardCompatibilityMode;
 - (BOOL)usesKeyboardCommandToControlCompatibility;
 - (BOOL)usesKeyboardLeftControlWinSwapCompatibility;
+- (BOOL)usesKeyboardOptionCommandSwapCompatibility;
 - (BOOL)usesKeyboardShortcutTranslationCompatibility;
 - (void)updateKeyboardPhysicalModifierStateFromEvent:(NSEvent *)event;
 - (BOOL)shouldApplyKeyboardShortcutTranslationForEvent:(NSEvent *)event;
