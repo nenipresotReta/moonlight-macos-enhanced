@@ -182,6 +182,7 @@ import VideoToolbox
   case swapLeftControlAndWin = 2
   case shortcutTranslation = 3
   case hybrid = 4
+  case swapOptionAndCommand = 5
 
   static let defaultMode: Self = .standard
 
@@ -195,6 +196,8 @@ import VideoToolbox
       self = .shortcutTranslation
     case KeyboardCompatibilityMode.hybrid.rawValue:
       self = .hybrid
+    case KeyboardCompatibilityMode.swapOptionAndCommand.rawValue:
+      self = .swapOptionAndCommand
     default:
       self = .standard
     }
@@ -216,6 +219,8 @@ import VideoToolbox
       return "Mac Shortcuts as Windows Shortcuts"
     case .hybrid:
       return "Windows Shortcuts + Left Ctrl ↔ Left Win"
+    case .swapOptionAndCommand:
+      return "⌥ as Win, ⌘ as Alt"
     }
   }
 

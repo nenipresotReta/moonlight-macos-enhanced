@@ -858,6 +858,7 @@
 "Mac Shortcuts as Windows Shortcuts" = "Shortcut Translation (⌘ → Ctrl)";
 "⌘ as Ctrl + Custom Rules" = "⌘ as Ctrl + Custom Rules";
 "Windows Shortcuts + Left Ctrl ↔ Left Win" = "Windows Shortcuts + Left Ctrl ↔ Left Win";
+"⌥ as Win, ⌘ as Alt" = "Windows Key Order (⌥ → Win, ⌘ → Alt)";
 "Shortcut Translation Mode Keep Mac detail" = "Keeps Mac-style shortcuts unchanged. Use this if you do not want automatic remapping.";
 "Shortcut Translation Mode CommandToControl detail" = "Always sends ⌘ as Ctrl to the host, even when it is not part of a shortcut.";
 "Shortcut Translation Mode SwapLeftControlAndWin detail" = "Swaps the left Ctrl and left Win positions. Best if you want a Windows-like bottom-left layout.";

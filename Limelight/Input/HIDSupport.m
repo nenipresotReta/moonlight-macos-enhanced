@@ -322,6 +322,7 @@ static NSUInteger HIDSyntheticRemoteModifierMaskForKeyCode(HIDSupport *support,
     BOOL hardMapCommandToControl = [support usesKeyboardCommandToControlCompatibility];
     BOOL shortcutTranslationCommandToControl =
         preferShortcutTranslationCommandMapping && [support usesKeyboardShortcutTranslationCompatibility];
+    BOOL swapOptionAndCommand = [support usesKeyboardOptionCommandSwapCompatibility];
 
     switch (keyCode) {
         case kVK_Shift:
@@ -333,14 +334,20 @@ static NSUInteger HIDSyntheticRemoteModifierMaskForKeyCode(HIDSupport *support,
         case kVK_RightControl:
             return HIDKeyboardRemoteModifierMaskRightControl;
         case kVK_Option:
-            return HIDKeyboardRemoteModifierMaskLeftAlt;
+            return swapOptionAndCommand ? HIDKeyboardRemoteModifierMaskLeftMeta : HIDKeyboardRemoteModifierMaskLeftAlt;
         case kVK_RightOption:
-            return HIDKeyboardRemoteModifierMaskRightAlt;
+            return swapOptionAndCommand ? HIDKeyboardRemoteModifierMaskRightMeta : HIDKeyboardRemoteModifierMaskRightAlt;
         case kVK_Command:
+            if (swapOptionAndCommand) {
+                return HIDKeyboardRemoteModifierMaskLeftAlt;
+            }
             return (hardMapCommandToControl || swapLeftControlAndWin || shortcutTranslationCommandToControl)
                 ? HIDKeyboardRemoteModifierMaskLeftControl
                 : HIDKeyboardRemoteModifierMaskLeftMeta;
         case kVK_RightCommand:
+            if (swapOptionAndCommand) {
+                return HIDKeyboardRemoteModifierMaskRightAlt;
+            }
             return (hardMapCommandToControl || shortcutTranslationCommandToControl)
                 ? HIDKeyboardRemoteModifierMaskRightControl
                 : HIDKeyboardRemoteModifierMaskRightMeta;
@@ -976,6 +983,12 @@ static short HIDVirtualKeyForTypedCharacter(UniChar character) {
            mode == KeyboardCompatibilityModeHybrid;
 }
 
+// Windows key order: the keys beside Control send Win then Alt, like a PC
+// keyboard, instead of Option→Alt and Command→Win.
+- (BOOL)usesKeyboardOptionCommandSwapCompatibility {
+    return [self keyboardCompatibilityMode] == KeyboardCompatibilityModeSwapOptionAndCommand;
+}
+
 - (BOOL)usesKeyboardShortcutTranslationCompatibility {
     KeyboardCompatibilityMode mode = [self keyboardCompatibilityMode];
     return mode == KeyboardCompatibilityModeShortcutTranslation ||
@@ -1027,6 +1040,7 @@ static short HIDVirtualKeyForTypedCharacter(UniChar character) {
     BOOL swapLeftControlAndWin = [self usesKeyboardLeftControlWinSwapCompatibility];
     BOOL hardMapCommandToControl = [self usesKeyboardCommandToControlCompatibility];
     BOOL translateShortcutCommandToControl = [self shouldApplyKeyboardShortcutTranslationForEvent:event];
+    BOOL swapOptionAndCommand = [self usesKeyboardOptionCommandSwapCompatibility];
     BOOL deferredLeftCommandToControl =
         (self.keyboardDeferredShortcutTranslationCommandMask & HIDKeyboardPhysicalModifierMaskLeftCommand) != 0;
     BOOL deferredRightCommandToControl =
@@ -1047,10 +1061,20 @@ static short HIDVirtualKeyForTypedCharacter(UniChar character) {
         desired |= HIDKeyboardRemoteModifierMaskRightControl;
     }
     if (physical & HIDKeyboardPhysicalModifierMaskLeftOption) {
-        desired |= HIDKeyboardRemoteModifierMaskLeftAlt;
+        desired |= swapOptionAndCommand ? HIDKeyboardRemoteModifierMaskLeftMeta : HIDKeyboardRemoteModifierMaskLeftAlt;
     }
     if (physical & HIDKeyboardPhysicalModifierMaskRightOption) {
-        desired |= HIDKeyboardRemoteModifierMaskRightAlt;
+        desired |= swapOptionAndCommand ? HIDKeyboardRemoteModifierMaskRightMeta : HIDKeyboardRemoteModifierMaskRightAlt;
+    }
+
+    if (swapOptionAndCommand) {
+        if (physical & HIDKeyboardPhysicalModifierMaskLeftCommand) {
+            desired |= HIDKeyboardRemoteModifierMaskLeftAlt;
+        }
+        if (physical & HIDKeyboardPhysicalModifierMaskRightCommand) {
+            desired |= HIDKeyboardRemoteModifierMaskRightAlt;
+        }
+        return desired;
     }
 
     if (physical & HIDKeyboardPhysicalModifierMaskLeftCommand) {

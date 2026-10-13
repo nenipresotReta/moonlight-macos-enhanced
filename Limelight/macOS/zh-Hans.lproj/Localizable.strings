@@ -857,6 +857,7 @@
 "Mac Shortcuts as Windows Shortcuts" = "快捷键翻译（⌘ 组合键→Ctrl）";
 "⌘ as Ctrl + Custom Rules" = "Windows 快捷键 + 自定义规则";
 "Windows Shortcuts + Left Ctrl ↔ Left Win" = "快捷键翻译 + 交换左 Ctrl / 左 Win";
+"⌥ as Win, ⌘ as Alt" = "Windows 键位顺序（⌥ 当 Win，⌘ 当 Alt）";
 "Shortcut Translation Mode Keep Mac detail" = "不做自动替换，Mac 上怎么按，这里就怎么发。";
 "Shortcut Translation Mode CommandToControl detail" = "无论是不是快捷键，只要按下 ⌘，都会按主机上的 Ctrl 发出去。";
 "Shortcut Translation Mode SwapLeftControlAndWin detail" = "交换左 Ctrl 和左 Win 的位置，更接近 Windows 键盘左下角手感。";
