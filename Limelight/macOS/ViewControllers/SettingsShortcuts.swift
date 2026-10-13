@@ -591,6 +591,34 @@ final class KeyboardTranslationProfile: NSObject {
     StreamShortcutProfile.remoteDisplayTokens(for: shortcut)
   }
 
+  /// Shortcuts macOS acts on before the app sees them. A rule can only use one as its
+  /// trigger while Capture System Shortcuts hands them to the stream.
+  static func isMacSystemShortcut(_ shortcut: StreamShortcut) -> Bool {
+    guard !shortcut.modifierOnly, shortcut.hasKeyCode else { return false }
+    let modifiers = StreamShortcutProfile.relevantModifierFlags(shortcut.modifierFlags)
+    let key = shortcut.keyCode
+    let command = modifiers.contains(.command)
+    let control = modifiers.contains(.control)
+    let arrows = [kVK_LeftArrow, kVK_RightArrow, kVK_UpArrow, kVK_DownArrow]
+    let digits = [kVK_ANSI_1, kVK_ANSI_2, kVK_ANSI_3, kVK_ANSI_4, kVK_ANSI_5,
+                  kVK_ANSI_6, kVK_ANSI_7, kVK_ANSI_8, kVK_ANSI_9]
+    if command && (key == kVK_Tab || key == kVK_ANSI_Grave || key == kVK_Space) { return true }
+    if control && (key == kVK_Space || arrows.contains(key) || digits.contains(key)) { return true }
+    if command && modifiers.contains(.shift) &&
+      [kVK_ANSI_3, kVK_ANSI_4, kVK_ANSI_5, kVK_ANSI_6, kVK_ANSI_Q].contains(key) { return true }
+    if command && modifiers.contains(.option) && (key == kVK_ANSI_D || key == kVK_ANSI_H) { return true }
+    if modifiers == [.command] && (key == kVK_ANSI_H || key == kVK_ANSI_M) { return true }
+    if control && command && key == kVK_ANSI_F { return true }
+    return false
+  }
+
+  /// Force Quit and Lock Screen are never captured, so they can never trigger a rule.
+  static func isNeverCapturedShortcut(_ shortcut: StreamShortcut) -> Bool {
+    let modifiers = StreamShortcutProfile.relevantModifierFlags(shortcut.modifierFlags)
+    return (shortcut.keyCode == kVK_Escape && modifiers.contains([.command, .option]))
+      || (shortcut.keyCode == kVK_ANSI_Q && modifiers.contains([.command, .control]))
+  }
+
   @objc static func validationErrorKey(
     forTrigger shortcut: StreamShortcut,
     editingRuleId: String?,
@@ -598,6 +626,9 @@ final class KeyboardTranslationProfile: NSObject {
     streamShortcuts: [String: StreamShortcut]
   ) -> String? {
     let modifiers = StreamShortcutProfile.relevantModifierFlags(shortcut.modifierFlags)
+    if isNeverCapturedShortcut(shortcut) {
+      return "Shortcut never captured"
+    }
 
     if shortcut.modifierOnly || !shortcut.hasKeyCode {
       return "Shortcut must include regular key"

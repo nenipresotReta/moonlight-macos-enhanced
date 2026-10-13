@@ -260,6 +260,9 @@ private struct KeyboardMouseSettingsSection: View {
             InfoHintButton(
               hintKey: "Capture System Shortcuts Permission Hint",
               systemImage: "exclamationmark.triangle.fill", tint: .orange)
+            Button(languageManager.localize("Grant Access")) { accessibility.request() }
+              .controllerButtonStyle(.bordered)
+              .controlSize(.small)
           }
           InfoHintButton(hintKey: "Capture System Shortcuts Hint")
           Toggle("", isOn: $settingsModel.captureSystemShortcuts)
@@ -284,6 +287,9 @@ private struct KeyboardMouseSettingsSection: View {
             InfoHintButton(
               hintKey: "Precision Touchpad Gesture Permission Hint",
               systemImage: "exclamationmark.triangle.fill", tint: .orange)
+            Button(languageManager.localize("Grant Access")) { accessibility.request() }
+              .controllerButtonStyle(.bordered)
+              .controlSize(.small)
           }
           InfoHintButton(hintKey: "Precision Touchpad Hint")
           Picker("", selection: $settingsModel.hostPrecisionTouchpadMode) {
@@ -361,8 +367,9 @@ final class AccessibilityGesturePermission: ObservableObject {
     isTrusted = MLSystemGestureBlocker.isAccessibilityTrusted()
   }
 
-  /// The first request shows the system prompt (which also lists the app in the pane);
-  /// later requests open the Accessibility pane directly.
+  /// The first request clears any switch left over from an earlier build and shows the
+  /// system prompt for this one (which also lists the app in the pane); later requests
+  /// open the Accessibility pane directly.
   func request() {
     refresh()
     guard !isTrusted else { return }
@@ -370,7 +377,7 @@ final class AccessibilityGesturePermission: ObservableObject {
       MLSystemGestureBlocker.openAccessibilitySettings()
     } else {
       didPromptThisSession = true
-      _ = MLSystemGestureBlocker.requestAccessibilityPermission()
+      _ = MLSystemGestureBlocker.resetAndRequestAccessibilityPermission()
     }
   }
 
@@ -382,16 +389,10 @@ final class AccessibilityGesturePermission: ObservableObject {
     alert.alertStyle = .informational
     alert.messageText = language.localize(titleKey)
     alert.informativeText = language.localize(messageKey)
-    alert.addButton(withTitle: language.localize("Open Accessibility Settings"))
+    alert.addButton(withTitle: language.localize("Grant Accessibility Access"))
     alert.addButton(withTitle: language.localize("Not Now"))
     guard alert.runModal() == .alertFirstButtonReturn else { return }
-    if didPromptThisSession {
-      MLSystemGestureBlocker.openAccessibilitySettings()
-    } else {
-      didPromptThisSession = true
-      // The system prompt lists the app under Accessibility and offers its own shortcut to the pane.
-      _ = MLSystemGestureBlocker.requestAccessibilityPermission()
-    }
+    request()
   }
 }
 
