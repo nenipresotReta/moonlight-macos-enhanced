@@ -115,7 +115,7 @@ extension SettingsSearchIndex {
     SettingsSearchEntry(id: "audio/EQ/EQ Preamp", pane: .audio, kind: .row, sectionKey: "EQ", titleKey: "EQ Preamp", detailKey: nil, keywords: []),
     SettingsSearchEntry(id: "audio/Microphone/Enable Microphone", pane: .audio, kind: .row, sectionKey: "Microphone", titleKey: "Enable Microphone", detailKey: nil, keywords: []),
     SettingsSearchEntry(id: "audio/Microphone/Microphone Permission", pane: .audio, kind: .row, sectionKey: "Microphone", titleKey: "Microphone Permission", detailKey: nil, keywords: []),
-    SettingsSearchEntry(id: "audio/Microphone/Microphone Device", pane: .audio, kind: .row, sectionKey: "Microphone", titleKey: "Microphone Device", detailKey: nil, keywords: ["System Default"]),
+    SettingsSearchEntry(id: "audio/Microphone/Microphone Device", pane: .audio, kind: .row, sectionKey: "Microphone", titleKey: "Microphone Device", detailKey: nil, keywords: ["System Default", "Chosen device (not connected)"]),
     SettingsSearchEntry(id: "audio/Microphone/Start Test", pane: .audio, kind: .row, sectionKey: "Microphone", titleKey: "Start Test", detailKey: nil, keywords: []),
   ]
 
@@ -144,8 +144,7 @@ extension SettingsSearchIndex {
     SettingsSearchEntry(id: "keyboard/Keyboard & Mouse/Mouse Driver", pane: .keyboard, kind: .row, sectionKey: "Keyboard & Mouse", titleKey: "Mouse Driver", detailKey: nil, keywords: []),
     SettingsSearchEntry(id: "keyboard/Keyboard & Mouse/Keyboard Translation", pane: .keyboard, kind: .row, sectionKey: "Keyboard & Mouse", titleKey: "Keyboard Translation", detailKey: nil, keywords: []),
     SettingsSearchEntry(id: "keyboard/Keyboard & Mouse/Key Mapping", pane: .keyboard, kind: .row, sectionKey: "Keyboard & Mouse", titleKey: "Key Mapping", detailKey: "Key Mapping detail", keywords: []),
-    SettingsSearchEntry(id: "keyboard/Keyboard & Mouse/Capture System Shortcuts", pane: .keyboard, kind: .row, sectionKey: "Keyboard & Mouse", titleKey: "Capture System Shortcuts", detailKey: nil, keywords: []),
-    SettingsSearchEntry(id: "keyboard/Keyboard & Mouse/Absolute Mouse Mode", pane: .keyboard, kind: .row, sectionKey: "Keyboard & Mouse", titleKey: "Absolute Mouse Mode", detailKey: nil, keywords: []),
+    SettingsSearchEntry(id: "keyboard/Keyboard & Mouse/Capture System Shortcuts", pane: .keyboard, kind: .row, sectionKey: "Keyboard & Mouse", titleKey: "Capture System Shortcuts", detailKey: nil, keywords: ["Capture System Shortcuts Permission Hint", "Capture System Shortcuts Hint"]),
     SettingsSearchEntry(id: "keyboard/Keyboard & Mouse/Swap Mouse Buttons", pane: .keyboard, kind: .row, sectionKey: "Keyboard & Mouse", titleKey: "Swap Mouse Buttons", detailKey: nil, keywords: []),
     SettingsSearchEntry(id: "keyboard/Keyboard & Mouse/Reverse Scroll Direction", pane: .keyboard, kind: .row, sectionKey: "Keyboard & Mouse", titleKey: "Reverse Scroll Direction", detailKey: nil, keywords: []),
     SettingsSearchEntry(id: "keyboard/Keyboard & Mouse/Precision Touchpad", pane: .keyboard, kind: .row, sectionKey: "Keyboard & Mouse", titleKey: "Precision Touchpad", detailKey: nil, keywords: ["Precision Touchpad Off", "Precision Touchpad Block", "Precision Touchpad Both", "Precision Touchpad Gesture Permission Hint", "Precision Touchpad Hint"]),

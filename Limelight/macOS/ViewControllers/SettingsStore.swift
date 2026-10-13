@@ -107,7 +107,6 @@ struct Settings: Encodable, Decodable {
   let quitAppAfterStream: Bool?
 
   // Input Settings
-  let absoluteMouseMode: Bool?
   let swapMouseButtons: Bool?
   let reverseScrollDirection: Bool?
   let touchscreenMode: Int?
@@ -263,7 +262,6 @@ struct Settings: Encodable, Decodable {
       appArtworkDimensions: appArtworkDimensions,
       dimNonHoveredArtwork: dimNonHoveredArtwork,
       quitAppAfterStream: quitAppAfterStream,
-      absoluteMouseMode: absoluteMouseMode,
       swapMouseButtons: swapMouseButtons,
       reverseScrollDirection: reverseScrollDirection,
       touchscreenMode: touchscreenMode,
@@ -521,7 +519,6 @@ extension SettingsClass {
 
       quitAppAfterStream: settings.quitAppAfterStream,
 
-      absoluteMouseMode: settings.absoluteMouseMode,
       swapMouseButtons: settings.swapMouseButtons,
       reverseScrollDirection: settings.reverseScrollDirection,
       touchscreenMode: settings.touchscreenMode,

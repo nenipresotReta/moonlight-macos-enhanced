@@ -283,7 +283,6 @@ public class LanguageManager: NSObject, ObservableObject {
 
     "Mouse": "Mouse",
     "Optimize mouse for remote desktop": "Optimize mouse for remote desktop",
-    "Absolute Mouse Mode hint": "Best used in Remote Desktop mode. Game mode and some mouse drivers fall back to relative movement to avoid pointer lockups.",
     "Pointer Speed": "Pointer Speed",
     "Pointer Speed hint": "Adjusts relative mouse / trackpad speed. Doesn't affect absolute mouse mode.",
     "Swap Left and Right Mouse Buttons": "Swap Left and Right Mouse Buttons",
@@ -665,7 +664,6 @@ public class LanguageManager: NSObject, ObservableObject {
     "Long-press Menu Mouse Hint": "长按 Menu/Options 约 2 秒，在手柄模式和鼠标模式之间切换。",
     "Mouse": "鼠标",
     "Optimize mouse for remote desktop": "优化远程桌面鼠标 (绝对位置)",
-    "Absolute Mouse Mode hint": "建议配合远控模式使用。游戏模式或部分鼠标驱动会自动回退为相对移动，避免光标卡死。",
     "Pointer Speed": "指针速度",
     "Pointer Speed hint": "调整相对鼠标 / 触控板速度；绝对鼠标模式不受这个选项影响。",
     "Swap Left and Right Mouse Buttons": "交换鼠标左右键",

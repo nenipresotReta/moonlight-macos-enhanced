@@ -208,7 +208,6 @@ class SettingsClass: NSObject {
         "appArtworkDimensions": settings.appArtworkDimensions,
         "dimNonHoveredArtwork": settings.dimNonHoveredArtwork,
         "quitAppAfterStream": settings.quitAppAfterStream,
-        "absoluteMouseMode": settings.absoluteMouseMode,
         "swapMouseButtons": settings.swapMouseButtons,
         "reverseScrollDirection": settings.reverseScrollDirection,
         "gamepadMouseMode": settings.gamepadMouseMode,
@@ -389,7 +388,6 @@ class SettingsClass: NSObject {
 
       quitAppAfterStream: settings.quitAppAfterStream,
 
-      absoluteMouseMode: settings.absoluteMouseMode,
       swapMouseButtons: settings.swapMouseButtons,
       reverseScrollDirection: settings.reverseScrollDirection,
       touchscreenMode: settings.touchscreenMode,
@@ -499,7 +497,6 @@ class SettingsClass: NSObject {
         appArtworkDimensions: updated.appArtworkDimensions,
         dimNonHoveredArtwork: updated.dimNonHoveredArtwork,
         quitAppAfterStream: updated.quitAppAfterStream,
-        absoluteMouseMode: updated.absoluteMouseMode,
         swapMouseButtons: updated.swapMouseButtons,
         reverseScrollDirection: updated.reverseScrollDirection,
         touchscreenMode: updated.touchscreenMode,
@@ -617,7 +614,6 @@ class SettingsClass: NSObject {
 
       quitAppAfterStream: settings.quitAppAfterStream,
 
-      absoluteMouseMode: settings.absoluteMouseMode,
       swapMouseButtons: settings.swapMouseButtons,
       reverseScrollDirection: settings.reverseScrollDirection,
       touchscreenMode: settings.touchscreenMode,
@@ -1487,13 +1483,6 @@ class SettingsClass: NSObject {
       return settings.quitAppAfterStream ?? SettingsModel.defaultQuitAppAfterStream
     }
     return SettingsModel.defaultQuitAppAfterStream
-  }
-
-  @objc static func absoluteMouseMode(for key: String) -> Bool {
-    if let settings = Settings.getSettings(for: key) {
-      return settings.absoluteMouseMode ?? SettingsModel.defaultAbsoluteMouseMode
-    }
-    return SettingsModel.defaultAbsoluteMouseMode
   }
 
   @objc static func swapMouseButtons(for key: String) -> Bool {

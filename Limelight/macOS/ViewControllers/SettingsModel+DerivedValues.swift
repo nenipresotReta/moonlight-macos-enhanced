@@ -1422,7 +1422,6 @@ extension SettingsModel {
   static let defaultAppArtworkWidth: CGFloat? = nil
   static let defaultAppArtworkHeight: CGFloat? = nil
   static let defaultQuitAppAfterStream = false
-  static let defaultAbsoluteMouseMode = false
   static let defaultSwapMouseButtons = false
   static let defaultReverseScrollDirection = false
   static let defaultPointerSensitivity: CGFloat = 1.0
