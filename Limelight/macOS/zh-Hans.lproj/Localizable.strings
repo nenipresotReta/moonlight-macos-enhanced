@@ -104,7 +104,7 @@
 "Mouse Mode detail" = "锁定鼠标模式更适合游戏；自由鼠标模式更适合远控。";
 "Free Mouse" = "自由鼠标";
 "Free Mouse Movement" = "自由鼠标移动";
-"Free Mouse Movement detail" = "自动会优先选择更快的路径。桌面同步保持经典指针同步。快速响应会尽量持续使用相对移动。";
+"Free Mouse Movement detail" = "自动优先使用快速响应。桌面同步跟随 macOS 的鼠标速度和加速。快速响应保持固定灵敏度。";
 "Physical Wheel Mode" = "物理滚轮模式";
 "Physical Wheel Mode detail" = "自动会优先按高精度处理；高精度会更细、更顺，分段则更像普通滚轮。";
 "Physical Wheel Distance" = "物理滚轮距离";

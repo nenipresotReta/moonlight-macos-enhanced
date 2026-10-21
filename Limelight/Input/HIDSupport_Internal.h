@@ -25,6 +25,8 @@
 
 @import GameController;
 
+@class HIDAbsolutePointerBatch;
+
 @interface HIDSupport () <CoreHIDMouseDriverDelegate>
 @property (nonatomic) unsigned short authoredRumbleLow;
 @property (nonatomic) unsigned short authoredRumbleHigh;
@@ -97,12 +99,7 @@
 @property (atomic) BOOL freeMouseVirtualCursorRequestedActive;
 @property (nonatomic) BOOL freeMouseVirtualCursorHasAnchor;
 @property (nonatomic) NSPoint freeMouseVirtualCursorPoint;
-@property (nonatomic) NSPoint freeMouseVirtualCursorLastAnchorPoint;
 @property (nonatomic) NSSize freeMouseVirtualCursorReferenceSize;
-@property (nonatomic) double freeMouseVirtualCursorGainX;
-@property (nonatomic) double freeMouseVirtualCursorGainY;
-@property (nonatomic) double freeMouseVirtualCursorRawSinceAnchorX;
-@property (nonatomic) double freeMouseVirtualCursorRawSinceAnchorY;
 @property (nonatomic, strong) NSObject *inputDiagnosticsLock;
 @property (atomic) BOOL inputDiagnosticsEnabled;
 @property (nonatomic) NSUInteger inputDiagnosticsDetailedLogSequence;
@@ -132,13 +129,8 @@
 @property (nonatomic) short lastAbsolutePointerReferenceHeight;
 @property (nonatomic) uint64_t lastAbsolutePointerAtMs;
 @property (nonatomic, copy) NSString *lastAbsolutePointerSource;
-@property (atomic) BOOL pendingCoalescedAbsolutePointerDispatch;
-@property (atomic) BOOL pendingCoalescedAbsolutePointerValid;
-@property (nonatomic) short pendingCoalescedAbsolutePointerHostX;
-@property (nonatomic) short pendingCoalescedAbsolutePointerHostY;
-@property (nonatomic) short pendingCoalescedAbsolutePointerReferenceWidth;
-@property (nonatomic) short pendingCoalescedAbsolutePointerReferenceHeight;
-@property (nonatomic, copy) NSString *pendingCoalescedAbsolutePointerSource;
+@property (nonatomic, strong) HIDAbsolutePointerBatch *pendingAbsolutePointerBatch;
+@property (nonatomic, strong) HIDAbsolutePointerBatch *lastSubmittedAbsolutePointerBatch;
 @property (nonatomic) uint32_t pressedMouseButtonsMask;
 @property (nonatomic) CGFloat accumulatedHighResScrollDeltaX;
 @property (nonatomic) CGFloat accumulatedHighResScrollDeltaY;

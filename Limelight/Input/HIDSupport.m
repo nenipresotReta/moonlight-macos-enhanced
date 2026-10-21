@@ -852,8 +852,6 @@ static short HIDVirtualKeyForTypedCharacter(UniChar character) {
         _loggedKeyMappingMode = -1;
         [self setUpPrecisionTouchpad];
         self.freeMouseVirtualCursorLock = [[NSObject alloc] init];
-        self.freeMouseVirtualCursorGainX = 1.0;
-        self.freeMouseVirtualCursorGainY = 1.0;
         self.inputDiagnosticsLock = [[NSObject alloc] init];
         self.pressedMouseButtonsMask = 0;
         [self resetInputDiagnostics];

@@ -65,37 +65,19 @@ static inline NSPoint HIDClampFreeMousePoint(NSPoint point, NSSize referenceSize
                        HIDClampFreeMouseCoordinate(point.y, maxY));
 }
 
-static inline double HIDClampFreeMouseGain(double value) {
-    if (!isfinite(value)) {
-        return 1.0;
-    }
-    if (value < 0.25) {
-        return 0.25;
-    }
-    if (value > 4.0) {
-        return 4.0;
-    }
-    return value;
-}
+// Each queued batch owns its payload. A click or explicit sync seals the current
+// batch, so later raw reports cannot move ahead of that event on inputQueue.
+@interface HIDAbsolutePointerBatch : NSObject
+@property short x, y, width, height;
+@property (nonatomic, copy) NSString *source;
+@end
+@implementation HIDAbsolutePointerBatch
+@end
 
-static inline double HIDBlendFreeMouseGain(double currentGain, double rawDelta, double observedDelta) {
-    if (!isfinite(rawDelta) || !isfinite(observedDelta)) {
-        return currentGain;
-    }
-    if (fabs(rawDelta) < 0.5 || fabs(observedDelta) < 0.25) {
-        return currentGain;
-    }
-    if ((rawDelta > 0.0 && observedDelta < 0.0) || (rawDelta < 0.0 && observedDelta > 0.0)) {
-        return currentGain;
-    }
-
-    double sample = fabs(observedDelta / rawDelta);
-    sample = HIDClampFreeMouseGain(sample);
-    if (!isfinite(currentGain) || currentGain <= 0.0) {
-        return sample;
-    }
-
-    return HIDClampFreeMouseGain((currentGain * 0.82) + (sample * 0.18));
+static BOOL HIDAbsolutePointerBatchMatches(HIDAbsolutePointerBatch *batch,
+                                          short x, short y, short width, short height) {
+    return batch != nil && batch.x == x && batch.y == y &&
+           batch.width == width && batch.height == height;
 }
 
 @implementation HIDSupport (Pointer)
@@ -122,104 +104,64 @@ static inline double HIDBlendFreeMouseGain(double currentGain, double rawDelta, 
     @synchronized (self.freeMouseVirtualCursorLock) {
         self.freeMouseVirtualCursorHasAnchor = NO;
         self.freeMouseVirtualCursorPoint = NSZeroPoint;
-        self.freeMouseVirtualCursorLastAnchorPoint = NSZeroPoint;
         self.freeMouseVirtualCursorReferenceSize = NSZeroSize;
-        self.freeMouseVirtualCursorGainX = 1.0;
-        self.freeMouseVirtualCursorGainY = 1.0;
-        self.freeMouseVirtualCursorRawSinceAnchorX = 0.0;
-        self.freeMouseVirtualCursorRawSinceAnchorY = 0.0;
     }
 }
 
 - (void)updateFreeMouseVirtualCursorAnchorWithViewPoint:(NSPoint)viewPoint
                                           referenceSize:(NSSize)referenceSize {
-    if (!self.freeMouseVirtualCursorRequestedActive) {
-        return;
-    }
-
     if (!isfinite(viewPoint.x) || !isfinite(viewPoint.y) ||
         !isfinite(referenceSize.width) || !isfinite(referenceSize.height) ||
         referenceSize.width <= 0.0 || referenceSize.height <= 0.0) {
         return;
     }
 
-    NSPoint clampedPoint = HIDClampFreeMousePoint(viewPoint, referenceSize);
-    BOOL shouldBlendGain = ![self hasPressedMouseButtons];
-
     @synchronized (self.freeMouseVirtualCursorLock) {
-        if (self.freeMouseVirtualCursorHasAnchor && shouldBlendGain) {
-            double observedDeltaX = clampedPoint.x - self.freeMouseVirtualCursorLastAnchorPoint.x;
-            double observedDeltaY = clampedPoint.y - self.freeMouseVirtualCursorLastAnchorPoint.y;
-            self.freeMouseVirtualCursorGainX = HIDBlendFreeMouseGain(self.freeMouseVirtualCursorGainX,
-                                                                     self.freeMouseVirtualCursorRawSinceAnchorX,
-                                                                     observedDeltaX);
-            self.freeMouseVirtualCursorGainY = HIDBlendFreeMouseGain(self.freeMouseVirtualCursorGainY,
-                                                                     self.freeMouseVirtualCursorRawSinceAnchorY,
-                                                                     observedDeltaY);
+        if (!self.freeMouseVirtualCursorRequestedActive) {
+            return;
         }
-
-        self.freeMouseVirtualCursorPoint = clampedPoint;
-        self.freeMouseVirtualCursorLastAnchorPoint = clampedPoint;
+        self.freeMouseVirtualCursorPoint = HIDClampFreeMousePoint(viewPoint, referenceSize);
         self.freeMouseVirtualCursorReferenceSize = referenceSize;
-        self.freeMouseVirtualCursorRawSinceAnchorX = 0.0;
-        self.freeMouseVirtualCursorRawSinceAnchorY = 0.0;
         self.freeMouseVirtualCursorHasAnchor = YES;
     }
 }
 
-- (BOOL)reconcileFreeMouseVirtualCursorToViewPoint:(NSPoint)viewPoint
-                                     referenceSize:(NSSize)referenceSize
-                               correctionThreshold:(CGFloat)correctionThreshold {
-    if (!self.freeMouseVirtualCursorRequestedActive) {
-        return NO;
-    }
-
+- (BOOL)seedFreeMouseVirtualCursorWithViewPoint:(NSPoint)viewPoint
+                                referenceSize:(NSSize)referenceSize {
     if (!isfinite(viewPoint.x) || !isfinite(viewPoint.y) ||
         !isfinite(referenceSize.width) || !isfinite(referenceSize.height) ||
         referenceSize.width <= 0.0 || referenceSize.height <= 0.0) {
         return NO;
     }
 
-    NSPoint clampedPoint = HIDClampFreeMousePoint(viewPoint, referenceSize);
-    BOOL shouldBlendGain = ![self hasPressedMouseButtons];
-    CGFloat threshold = MAX(0.0, correctionThreshold);
-    BOOL shouldSendCorrection = NO;
-
     @synchronized (self.freeMouseVirtualCursorLock) {
-        if (self.freeMouseVirtualCursorHasAnchor) {
-            if (shouldBlendGain) {
-                double observedDeltaX = clampedPoint.x - self.freeMouseVirtualCursorLastAnchorPoint.x;
-                double observedDeltaY = clampedPoint.y - self.freeMouseVirtualCursorLastAnchorPoint.y;
-                self.freeMouseVirtualCursorGainX = HIDBlendFreeMouseGain(self.freeMouseVirtualCursorGainX,
-                                                                         self.freeMouseVirtualCursorRawSinceAnchorX,
-                                                                         observedDeltaX);
-                self.freeMouseVirtualCursorGainY = HIDBlendFreeMouseGain(self.freeMouseVirtualCursorGainY,
-                                                                         self.freeMouseVirtualCursorRawSinceAnchorY,
-                                                                         observedDeltaY);
-            }
-
-            CGFloat driftX = fabs(clampedPoint.x - self.freeMouseVirtualCursorPoint.x);
-            CGFloat driftY = fabs(clampedPoint.y - self.freeMouseVirtualCursorPoint.y);
-            shouldSendCorrection = driftX > threshold || driftY > threshold;
-        } else {
-            shouldSendCorrection = YES;
+        if (!self.freeMouseVirtualCursorRequestedActive ||
+            (self.freeMouseVirtualCursorHasAnchor &&
+             NSEqualSizes(self.freeMouseVirtualCursorReferenceSize, referenceSize))) {
+            return NO;
         }
-
-        self.freeMouseVirtualCursorPoint = clampedPoint;
-        self.freeMouseVirtualCursorLastAnchorPoint = clampedPoint;
-        self.freeMouseVirtualCursorReferenceSize = referenceSize;
-        self.freeMouseVirtualCursorRawSinceAnchorX = 0.0;
-        self.freeMouseVirtualCursorRawSinceAnchorY = 0.0;
-        self.freeMouseVirtualCursorHasAnchor = YES;
-    }
-
-    if (shouldSendCorrection) {
-        [self sendAbsoluteMousePositionForViewPoint:clampedPoint
+        // AppKit positions and raw HID reports arrive independently. Once seeded,
+        // raw motion owns this trajectory until handoff, focus regain or resize.
+        // A delayed AppKit event must neither rewind it nor recalibrate its gain.
+        [self updateFreeMouseVirtualCursorAnchorWithViewPoint:viewPoint referenceSize:referenceSize];
+        [self sendAbsoluteMousePositionForViewPoint:self.freeMouseVirtualCursorPoint
                                       referenceSize:referenceSize
                                       clampToBounds:YES];
+        return YES;
     }
+}
 
-    return shouldSendCorrection;
+- (BOOL)sendCurrentFreeMouseVirtualCursorPosition {
+    @synchronized (self.freeMouseVirtualCursorLock) {
+        if (!self.freeMouseVirtualCursorRequestedActive || !self.freeMouseVirtualCursorHasAnchor ||
+            !HIDShouldUseCoreHIDFreeMouseAbsoluteSync(self)) {
+            return NO;
+        }
+        [self sendAbsoluteMousePositionForViewPoint:self.freeMouseVirtualCursorPoint
+                                      referenceSize:self.freeMouseVirtualCursorReferenceSize
+                                      clampToBounds:YES];
+        return YES;
+    }
 }
 
 - (BOOL)getFreeMouseVirtualCursorPoint:(NSPoint *)viewPoint
@@ -251,62 +193,73 @@ static inline double HIDBlendFreeMouseGain(double currentGain, double rawDelta, 
     return YES;
 }
 
-- (void)dispatchPendingCoalescedAbsolutePointerPosition {
-    __block short hostX = 0;
-    __block short hostY = 0;
-    __block short referenceWidth = 0;
-    __block short referenceHeight = 0;
-    __block NSString *source = nil;
-    __block BOOL hasPending = NO;
-
+- (void)dispatchAbsolutePointerBatch:(HIDAbsolutePointerBatch *)batch
+                       inputContext:(PML_INPUT_STREAM_CONTEXT)inputCtx {
+    short x, y, width, height;
+    NSString *source;
     @synchronized (self.inputDiagnosticsLock) {
-        if (self.pendingCoalescedAbsolutePointerValid) {
-            hostX = self.pendingCoalescedAbsolutePointerHostX;
-            hostY = self.pendingCoalescedAbsolutePointerHostY;
-            referenceWidth = self.pendingCoalescedAbsolutePointerReferenceWidth;
-            referenceHeight = self.pendingCoalescedAbsolutePointerReferenceHeight;
-            source = [self.pendingCoalescedAbsolutePointerSource copy];
-            self.pendingCoalescedAbsolutePointerValid = NO;
-            hasPending = YES;
-        } else {
-            self.pendingCoalescedAbsolutePointerDispatch = NO;
+        if (self.pendingAbsolutePointerBatch == batch) {
+            self.pendingAbsolutePointerBatch = nil;
         }
+        x = batch.x;
+        y = batch.y;
+        width = batch.width;
+        height = batch.height;
+        source = batch.source;
     }
-
-    if (!hasPending) {
+    if (!self.shouldSendInputEvents ||
+        [self.precisionTouchpad shouldSuppressPointerMotion] ||
+        !HIDValidateInputContext(inputCtx, "dispatchAbsolutePointerBatch")) {
+        @synchronized (self.inputDiagnosticsLock) {
+            if (self.lastSubmittedAbsolutePointerBatch == batch) {
+                self.lastSubmittedAbsolutePointerBatch = nil;
+            }
+        }
         return;
     }
+    [self recordAbsoluteInputDiagnosticsFrom:source x:x y:y width:width height:height];
+    LiSendMousePositionEventCtx(inputCtx, x, y, width, height);
+}
 
-    PML_INPUT_STREAM_CONTEXT inputCtx = HIDInputContext(self);
-    if (HIDValidateInputContext(inputCtx, "dispatchPendingCoalescedAbsolutePointerPosition") &&
-        self.shouldSendInputEvents) {
-        if (source.length > 0) {
-            [self recordAbsoluteInputDiagnosticsFrom:source
-                                                   x:hostX
-                                                   y:hostY
-                                               width:referenceWidth
-                                              height:referenceHeight];
-        }
-        LiSendMousePositionEventCtx(inputCtx, hostX, hostY, referenceWidth, referenceHeight);
-    }
-
-    BOOL shouldScheduleNext = NO;
+- (void)enqueueAbsolutePointerHostX:(short)x
+                              hostY:(short)y
+                     referenceWidth:(short)width
+                    referenceHeight:(short)height
+                          sourceTag:(NSString *)source
+                          coalesced:(BOOL)coalesced
+                       inputContext:(PML_INPUT_STREAM_CONTEXT)inputCtx {
     @synchronized (self.inputDiagnosticsLock) {
-        self.pendingCoalescedAbsolutePointerDispatch = NO;
-        if (self.pendingCoalescedAbsolutePointerValid) {
-            self.pendingCoalescedAbsolutePointerDispatch = YES;
-            shouldScheduleNext = YES;
+        if (!coalesced) {
+            self.pendingAbsolutePointerBatch = nil;
         }
-    }
-
-    if (shouldScheduleNext) {
-        PML_CONNECTION_CONTEXT connCtx = inputCtx != NULL ? inputCtx->connectionContext : NULL;
-        dispatch_async(self.inputQueue, ^{
-            if (connCtx != NULL) {
-                LiSetThreadConnectionContext(connCtx);
+        if (HIDAbsolutePointerBatchMatches(self.lastSubmittedAbsolutePointerBatch, x, y, width, height)) {
+            if (self.inputDiagnosticsEnabled) {
+                self.inputDiagnosticsAbsoluteDuplicateSkips += 1;
             }
-            [self dispatchPendingCoalescedAbsolutePointerPosition];
-        });
+            return;
+        }
+
+        HIDAbsolutePointerBatch *batch = coalesced ? self.pendingAbsolutePointerBatch : nil;
+        BOOL needsDispatch = batch == nil;
+        if (needsDispatch) {
+            batch = [HIDAbsolutePointerBatch new];
+        }
+        batch.x = x;
+        batch.y = y;
+        batch.width = width;
+        batch.height = height;
+        batch.source = source;
+        self.lastSubmittedAbsolutePointerBatch = batch;
+        if (coalesced) {
+            self.pendingAbsolutePointerBatch = batch;
+        }
+        if (needsDispatch) {
+            // Submit while holding the same lock used to seal batches. Otherwise
+            // another producer could enqueue a click before this batch's flush.
+            HIDDispatchInput(self, inputCtx, ^{
+                [self dispatchAbsolutePointerBatch:batch inputContext:inputCtx];
+            });
+        }
     }
 }
 
@@ -314,7 +267,7 @@ static inline double HIDBlendFreeMouseGain(double currentGain, double rawDelta, 
                                          referenceSize:(NSSize)referenceSize
                                          clampToBounds:(BOOL)clampToBounds
                                              sourceTag:(NSString *)sourceTag {
-    if ([self.precisionTouchpad shouldSuppressPointerMotion]) {
+    if (!self.shouldSendInputEvents || [self.precisionTouchpad shouldSuppressPointerMotion]) {
         return;
     }
 
@@ -337,54 +290,9 @@ static inline double HIDBlendFreeMouseGain(double currentGain, double rawDelta, 
         return;
     }
 
-    BOOL shouldSchedule = NO;
-    BOOL isDuplicate = NO;
-    @synchronized (self.inputDiagnosticsLock) {
-        BOOL matchesLastKnown = hostX == self.lastAbsolutePointerHostX &&
-                                hostY == self.lastAbsolutePointerHostY &&
-                                referenceWidth == self.lastAbsolutePointerReferenceWidth &&
-                                referenceHeight == self.lastAbsolutePointerReferenceHeight;
-        BOOL matchesPending = self.pendingCoalescedAbsolutePointerValid &&
-                              hostX == self.pendingCoalescedAbsolutePointerHostX &&
-                              hostY == self.pendingCoalescedAbsolutePointerHostY &&
-                              referenceWidth == self.pendingCoalescedAbsolutePointerReferenceWidth &&
-                              referenceHeight == self.pendingCoalescedAbsolutePointerReferenceHeight;
-        if (matchesLastKnown || matchesPending) {
-            isDuplicate = YES;
-            if (self.inputDiagnosticsEnabled) {
-                self.inputDiagnosticsAbsoluteDuplicateSkips += 1;
-            }
-        } else {
-            self.lastAbsolutePointerHostX = hostX;
-            self.lastAbsolutePointerHostY = hostY;
-            self.lastAbsolutePointerReferenceWidth = referenceWidth;
-            self.lastAbsolutePointerReferenceHeight = referenceHeight;
-            self.lastAbsolutePointerAtMs = LiGetMillis();
-            self.lastAbsolutePointerSource = [sourceTag copy];
-            self.pendingCoalescedAbsolutePointerHostX = hostX;
-            self.pendingCoalescedAbsolutePointerHostY = hostY;
-            self.pendingCoalescedAbsolutePointerReferenceWidth = referenceWidth;
-            self.pendingCoalescedAbsolutePointerReferenceHeight = referenceHeight;
-            self.pendingCoalescedAbsolutePointerSource = [sourceTag copy];
-            self.pendingCoalescedAbsolutePointerValid = YES;
-            if (!self.pendingCoalescedAbsolutePointerDispatch) {
-                self.pendingCoalescedAbsolutePointerDispatch = YES;
-                shouldSchedule = YES;
-            }
-        }
-    }
-
-    if (isDuplicate || !shouldSchedule) {
-        return;
-    }
-
-    PML_CONNECTION_CONTEXT connCtx = inputCtx->connectionContext;
-    dispatch_async(self.inputQueue, ^{
-        if (connCtx != NULL) {
-            LiSetThreadConnectionContext(connCtx);
-        }
-        [self dispatchPendingCoalescedAbsolutePointerPosition];
-    });
+    [self enqueueAbsolutePointerHostX:hostX hostY:hostY
+                       referenceWidth:referenceWidth referenceHeight:referenceHeight
+                            sourceTag:sourceTag coalesced:YES inputContext:inputCtx];
 }
 
 - (BOOL)dispatchVirtualFreeMouseDeltaX:(double)deltaX
@@ -406,37 +314,34 @@ static inline double HIDBlendFreeMouseGain(double currentGain, double rawDelta, 
     }
 
     CGFloat sensitivity = HIDPointerSensitivityForHost(self.host);
-    double calibratedSensitivity = sensitivity * HIDCoreHIDFreeMouseBaselineScale;
-    double viewDeltaX = deltaX * calibratedSensitivity;
-    double viewDeltaY = -deltaY * calibratedSensitivity;
+    double scaledSensitivity = sensitivity * HIDCoreHIDFreeMouseBaselineScale;
+    double viewDeltaX = deltaX * scaledSensitivity;
+    double viewDeltaY = -deltaY * scaledSensitivity;
 
     NSPoint predictedPoint = NSZeroPoint;
     NSSize referenceSize = NSZeroSize;
 
     @synchronized (self.freeMouseVirtualCursorLock) {
-        if (!self.freeMouseVirtualCursorHasAnchor ||
+        if (!self.freeMouseVirtualCursorRequestedActive ||
+            !self.freeMouseVirtualCursorHasAnchor ||
             self.freeMouseVirtualCursorReferenceSize.width <= 0.0 ||
             self.freeMouseVirtualCursorReferenceSize.height <= 0.0) {
             return NO;
         }
 
-        double gainX = HIDClampFreeMouseGain(self.freeMouseVirtualCursorGainX);
-        double gainY = HIDClampFreeMouseGain(self.freeMouseVirtualCursorGainY);
         predictedPoint = self.freeMouseVirtualCursorPoint;
-        predictedPoint.x += viewDeltaX * gainX;
-        predictedPoint.y += viewDeltaY * gainY;
+        predictedPoint.x += viewDeltaX;
+        predictedPoint.y += viewDeltaY;
         predictedPoint = HIDClampFreeMousePoint(predictedPoint, self.freeMouseVirtualCursorReferenceSize);
 
-        self.freeMouseVirtualCursorRawSinceAnchorX += viewDeltaX;
-        self.freeMouseVirtualCursorRawSinceAnchorY += viewDeltaY;
         self.freeMouseVirtualCursorPoint = predictedPoint;
         referenceSize = self.freeMouseVirtualCursorReferenceSize;
-    }
-
-    [self sendCoalescedAbsoluteMousePositionForViewPoint:predictedPoint
+        // Keep integration and submission atomic across concurrent HID callbacks.
+        [self sendCoalescedAbsoluteMousePositionForViewPoint:predictedPoint
                                            referenceSize:referenceSize
                                            clampToBounds:YES
                                                sourceTag:@"sendAbsoluteMousePosition"];
+    }
     return YES;
 }
 
@@ -759,9 +664,12 @@ static CVReturn displayLinkOutputCallback(CVDisplayLinkRef displayLink,
                                       button:button
                                         mask:self.pressedMouseButtonsMask
                                    synthetic:NO];
-    HIDDispatchInput(self, inputCtx, ^{
-        LiSendMouseButtonEventCtx(inputCtx, BUTTON_ACTION_PRESS, button);
-    });
+    @synchronized (self.inputDiagnosticsLock) {
+        self.pendingAbsolutePointerBatch = nil;
+        HIDDispatchInput(self, inputCtx, ^{
+            LiSendMouseButtonEventCtx(inputCtx, BUTTON_ACTION_PRESS, button);
+        });
+    }
 }
 
 - (void)mouseUp:(NSEvent *)event withButton:(int)button {
@@ -784,9 +692,12 @@ static CVReturn displayLinkOutputCallback(CVDisplayLinkRef displayLink,
     if (self.shouldSendInputEvents) {
         PML_INPUT_STREAM_CONTEXT inputCtx = HIDInputContext(self);
         if (HIDValidateInputContext(inputCtx, "mouseUp")) {
-            HIDDispatchInput(self, inputCtx, ^{
-                LiSendMouseButtonEventCtx(inputCtx, BUTTON_ACTION_RELEASE, button);
-            });
+            @synchronized (self.inputDiagnosticsLock) {
+                self.pendingAbsolutePointerBatch = nil;
+                HIDDispatchInput(self, inputCtx, ^{
+                    LiSendMouseButtonEventCtx(inputCtx, BUTTON_ACTION_RELEASE, button);
+                });
+            }
         }
     }
 
@@ -831,17 +742,12 @@ static CVReturn displayLinkOutputCallback(CVDisplayLinkRef displayLink,
                                              &referenceHeight)) {
             return;
         }
-        [self recordAbsoluteInputDiagnosticsFrom:@"mouseMoved"
-                                               x:hostX
-                                               y:hostY
-                                           width:referenceWidth
-                                          height:referenceHeight];
+        [self enqueueAbsolutePointerHostX:hostX hostY:hostY
+                           referenceWidth:referenceWidth referenceHeight:referenceHeight
+                                sourceTag:@"mouseMoved" coalesced:NO inputContext:inputCtx];
         [SettingsClass updateMouseInputRuntimeStatusFor:self.host.uuid
                                             summaryKey:@"Mouse Runtime Path Absolute Active"
                                              detailKey:@"Mouse Runtime Detail Absolute Active"];
-        HIDDispatchInput(self, inputCtx, ^{
-            LiSendMousePositionEventCtx(inputCtx, hostX, hostY, referenceWidth, referenceHeight);
-        });
     } else {
         if (self.useCoreHIDMouse &&
             self.coreHIDMouseDriver != nil &&
@@ -883,26 +789,14 @@ static CVReturn displayLinkOutputCallback(CVDisplayLinkRef displayLink,
         return;
     }
 
-    if (hostX == self.lastAbsolutePointerHostX &&
-        hostY == self.lastAbsolutePointerHostY &&
-        referenceWidth == self.lastAbsolutePointerReferenceWidth &&
-        referenceHeight == self.lastAbsolutePointerReferenceHeight) {
-        if (self.inputDiagnosticsEnabled) {
-            @synchronized (self.inputDiagnosticsLock) {
-                self.inputDiagnosticsAbsoluteDuplicateSkips += 1;
-            }
-        }
-        return;
+    @synchronized (self.freeMouseVirtualCursorLock) {
+        // Explicit handoff/focus sync must update the anchor and enter inputQueue
+        // together; a raw report must not be submitted between these operations.
+        [self updateFreeMouseVirtualCursorAnchorWithViewPoint:viewPoint referenceSize:referenceSize];
+        [self enqueueAbsolutePointerHostX:hostX hostY:hostY
+                           referenceWidth:referenceWidth referenceHeight:referenceHeight
+                                sourceTag:@"sendAbsoluteMousePosition" coalesced:NO inputContext:inputCtx];
     }
-
-    [self recordAbsoluteInputDiagnosticsFrom:@"sendAbsoluteMousePosition"
-                                           x:hostX
-                                           y:hostY
-                                       width:referenceWidth
-                                      height:referenceHeight];
-    HIDDispatchInput(self, inputCtx, ^{
-        LiSendMousePositionEventCtx(inputCtx, hostX, hostY, referenceWidth, referenceHeight);
-    });
 }
 
 - (void)sendMouseButton:(int)button
@@ -935,54 +829,62 @@ static CVReturn displayLinkOutputCallback(CVDisplayLinkRef displayLink,
         return;
     }
 
-    short hostX = 0;
-    short hostY = 0;
-    short referenceWidth = 0;
-    short referenceHeight = 0;
-    BOOL shouldSendAbsolute = HIDAbsoluteMousePositionForViewPoint(viewPoint,
-                                                                   referenceSize,
-                                                                   clampToBounds,
-                                                                   &hostX,
-                                                                   &hostY,
-                                                                   &referenceWidth,
-                                                                   &referenceHeight);
-    if (shouldSendAbsolute &&
-        hostX == self.lastAbsolutePointerHostX &&
-        hostY == self.lastAbsolutePointerHostY &&
-        referenceWidth == self.lastAbsolutePointerReferenceWidth &&
-        referenceHeight == self.lastAbsolutePointerReferenceHeight) {
-        if (self.inputDiagnosticsEnabled) {
-            @synchronized (self.inputDiagnosticsLock) {
-                self.inputDiagnosticsAbsoluteDuplicateSkips += 1;
+    @synchronized (self.freeMouseVirtualCursorLock) {
+        if (self.freeMouseVirtualCursorRequestedActive && self.freeMouseVirtualCursorHasAnchor &&
+            HIDShouldUseCoreHIDFreeMouseAbsoluteSync(self) &&
+            NSEqualSizes(referenceSize, self.freeMouseVirtualCursorReferenceSize)) {
+            viewPoint = self.freeMouseVirtualCursorPoint;
+        }
+        short hostX = 0;
+        short hostY = 0;
+        short referenceWidth = 0;
+        short referenceHeight = 0;
+        BOOL shouldSendAbsolute = HIDAbsoluteMousePositionForViewPoint(viewPoint,
+                                                                       referenceSize,
+                                                                       clampToBounds,
+                                                                       &hostX,
+                                                                       &hostY,
+                                                                       &referenceWidth,
+                                                                       &referenceHeight);
+        // A button is a boundary even when its position duplicates the previous one.
+        @synchronized (self.inputDiagnosticsLock) {
+            self.pendingAbsolutePointerBatch = nil;
+            if (shouldSendAbsolute && HIDAbsolutePointerBatchMatches(self.lastSubmittedAbsolutePointerBatch,
+                                                                     hostX, hostY, referenceWidth, referenceHeight)) {
+                if (self.inputDiagnosticsEnabled) {
+                    self.inputDiagnosticsAbsoluteDuplicateSkips += 1;
+                }
+                shouldSendAbsolute = NO;
             }
+            if (shouldSendAbsolute) {
+                HIDAbsolutePointerBatch *position = [HIDAbsolutePointerBatch new];
+                position.x = hostX;
+                position.y = hostY;
+                position.width = referenceWidth;
+                position.height = referenceHeight;
+                self.lastSubmittedAbsolutePointerBatch = position;
+            }
+
+            if (pressed) {
+                self.pressedMouseButtonsMask |= HIDMouseButtonBitForButton(button);
+                [self recordMouseButtonDiagnosticsAction:@"press"
+                                                  button:button
+                                                    mask:self.pressedMouseButtonsMask
+                                               synthetic:NO];
+            }
+
+            HIDDispatchInput(self, inputCtx, ^{
+                if (shouldSendAbsolute) {
+                    [self recordAbsoluteInputDiagnosticsFrom:@"sendAbsoluteMouseButtonSync"
+                                                           x:hostX y:hostY width:referenceWidth height:referenceHeight];
+                    LiSendMousePositionEventCtx(inputCtx, hostX, hostY, referenceWidth, referenceHeight);
+                }
+                LiSendMouseButtonEventCtx(inputCtx,
+                                          pressed ? BUTTON_ACTION_PRESS : BUTTON_ACTION_RELEASE,
+                                          button);
+            });
         }
-        shouldSendAbsolute = NO;
     }
-
-    if (pressed) {
-        self.pressedMouseButtonsMask |= HIDMouseButtonBitForButton(button);
-        [self recordMouseButtonDiagnosticsAction:@"press"
-                                          button:button
-                                            mask:self.pressedMouseButtonsMask
-                                       synthetic:NO];
-    }
-
-    if (shouldSendAbsolute) {
-        [self recordAbsoluteInputDiagnosticsFrom:@"sendAbsoluteMouseButtonSync"
-                                               x:hostX
-                                               y:hostY
-                                           width:referenceWidth
-                                          height:referenceHeight];
-    }
-
-    HIDDispatchInput(self, inputCtx, ^{
-        if (shouldSendAbsolute) {
-            LiSendMousePositionEventCtx(inputCtx, hostX, hostY, referenceWidth, referenceHeight);
-        }
-        LiSendMouseButtonEventCtx(inputCtx,
-                                  pressed ? BUTTON_ACTION_PRESS : BUTTON_ACTION_RELEASE,
-                                  button);
-    });
 
     if (!pressed) {
         self.pressedMouseButtonsMask &= ~HIDMouseButtonBitForButton(button);
