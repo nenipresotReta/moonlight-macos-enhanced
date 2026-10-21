@@ -13,7 +13,6 @@ static inline BOOL MLCGCursorIsVisibleCompat(void) {
 }
 
 static NSTimeInterval const MLDeferredMouseUncaptureRecoveryDelay = 0.12;
-static CGFloat const MLCoreHIDFreeMouseCorrectionThreshold = 1.5;
 static CGFloat const MLCoreHIDFreeMouseExitHandoffNudge = 1.5;
 static CGFloat const MLCoreHIDFreeMouseExitHandoffMaxProjectedOvershoot = 12.0;
 static CGFloat const MLCoreHIDFreeMouseExitThreshold = 1.0;
@@ -674,8 +673,6 @@ static inline NSPoint MLClampFreeMousePointToExitEdge(NSPoint point,
         return;
     }
 
-    [self.hidSupport updateFreeMouseVirtualCursorAnchorWithViewPoint:viewPoint
-                                                      referenceSize:self.view.bounds.size];
     [self.hidSupport sendAbsoluteMousePositionForViewPoint:viewPoint
                                              referenceSize:self.view.bounds.size
                                              clampToBounds:clampToBounds];
@@ -1208,8 +1205,6 @@ static inline NSPoint MLClampFreeMousePointToExitEdge(NSPoint point,
             return;
         }
     }
-    [self.hidSupport updateFreeMouseVirtualCursorAnchorWithViewPoint:currentPoint
-                                                      referenceSize:self.view.bounds.size];
     [self.hidSupport sendAbsoluteMousePositionForViewPoint:currentPoint
                                              referenceSize:self.view.bounds.size
                                              clampToBounds:YES];
@@ -1226,19 +1221,14 @@ static inline NSPoint MLClampFreeMousePointToExitEdge(NSPoint point,
         return;
     }
 
-    if (!self.hasCoreHIDFreeMouseLastTruthPoint) {
-        return;
-    }
-
-    NSPoint currentPoint = self.coreHIDFreeMouseLastTruthPoint;
+    NSPoint currentPoint = [self currentMouseLocationInViewCoordinates];
     NSRect toleranceBounds = NSInsetRect(self.view.bounds, -2.0, -2.0);
     if (!NSPointInRect(currentPoint, toleranceBounds)) {
         return;
     }
 
-    [self.hidSupport reconcileFreeMouseVirtualCursorToViewPoint:currentPoint
-                                                  referenceSize:self.view.bounds.size
-                                            correctionThreshold:MLCoreHIDFreeMouseCorrectionThreshold];
+    [self.hidSupport seedFreeMouseVirtualCursorWithViewPoint:currentPoint
+                                               referenceSize:self.view.bounds.size];
 }
 
 - (NSPoint)resolvedAbsoluteSyncViewPointForMouseEvent:(NSEvent *)event
@@ -1305,8 +1295,11 @@ static inline NSPoint MLClampFreeMousePointToExitEdge(NSPoint point,
     NSPoint resolvedPoint = [self resolvedAbsoluteSyncViewPointForMouseEvent:event
                                                                clampToBounds:clampToBounds
                                                                       reason:@"event-sync"];
-    [self.hidSupport updateFreeMouseVirtualCursorAnchorWithViewPoint:resolvedPoint
-                                                      referenceSize:self.view.bounds.size];
+    [self.hidSupport seedFreeMouseVirtualCursorWithViewPoint:resolvedPoint
+                                               referenceSize:self.view.bounds.size];
+    if ([self.hidSupport sendCurrentFreeMouseVirtualCursorPosition]) {
+        return;
+    }
     [self.hidSupport sendAbsoluteMousePositionForViewPoint:resolvedPoint
                                              referenceSize:self.view.bounds.size
                                              clampToBounds:clampToBounds];
@@ -1359,8 +1352,8 @@ static inline NSPoint MLClampFreeMousePointToExitEdge(NSPoint point,
     NSPoint resolvedPoint = [self resolvedAbsoluteSyncViewPointForMouseEvent:event
                                                                clampToBounds:YES
                                                                       reason:@"button-sync"];
-    [self.hidSupport updateFreeMouseVirtualCursorAnchorWithViewPoint:resolvedPoint
-                                                      referenceSize:self.view.bounds.size];
+    [self.hidSupport seedFreeMouseVirtualCursorWithViewPoint:resolvedPoint
+                                               referenceSize:self.view.bounds.size];
     [self.hidSupport sendMouseButton:button
                              pressed:pressed
                    syncedToViewPoint:resolvedPoint

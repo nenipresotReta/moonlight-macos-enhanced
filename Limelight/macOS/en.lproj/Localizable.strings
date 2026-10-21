@@ -106,7 +106,7 @@
 "Mouse Mode detail" = "Locked Mouse is better for games. Free Mouse is better for remote control.";
 "Free Mouse" = "Free Mouse";
 "Free Mouse Movement" = "Free Mouse Movement";
-"Free Mouse Movement detail" = "Automatic prefers the faster path when it is available. Desktop Sync keeps classic pointer sync. Fast Response keeps relative motion active more often.";
+"Free Mouse Movement detail" = "Automatic prefers Fast Response when available. Desktop Sync follows macOS pointer speed and acceleration. Fast Response uses fixed sensitivity.";
 "Physical Wheel Mode" = "Physical Wheel Mode";
 "Physical Wheel Mode detail" = "Automatic prefers High Precision first. High Precision keeps the motion finer and smoother, while Notched feels like a normal wheel.";
 "Physical Wheel Distance" = "Physical Wheel Distance";
