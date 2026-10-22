@@ -28,70 +28,81 @@
 
 - (void)saveContext
 {
-    NSError *error = nil;
-    NSManagedObjectContext *managedObjectContext = self.managedObjectContext;
-    if (managedObjectContext != nil) {
-        if ([managedObjectContext hasChanges] && ![managedObjectContext save:&error]) {
+    NSManagedObjectContext *context = self.managedObjectContext;
+    [context performBlockAndWait:^{
+        NSError *error = nil;
+        if ([context hasChanges] && ![context save:&error]) {
             Log(LOG_E, @"Critical database error: %@, %@", error, [error userInfo]);
         }
-    }
+    }];
 }
 
-// Returns the managed object context for the application.
-// If the context doesn't already exist, it is created and bound to the persistent store coordinator for the application.
+// Publish each lazy object only after it is ready. Discovery and UI callers can
+// request the database concurrently, including after a failed open.
 - (NSManagedObjectContext *)managedObjectContext
 {
-    if (_managedObjectContext != nil) {
+    @synchronized (self) {
+        if (_managedObjectContext != nil) {
+            return _managedObjectContext;
+        }
+
+        NSPersistentStoreCoordinator *coordinator = self.persistentStoreCoordinator;
+        if (coordinator == nil) {
+            return nil;
+        }
+
+        NSManagedObjectContext *context = [[NSManagedObjectContext alloc] initWithConcurrencyType:NSPrivateQueueConcurrencyType];
+        context.persistentStoreCoordinator = coordinator;
+        context.mergePolicy = NSMergeByPropertyObjectTrumpMergePolicy;
+        _managedObjectContext = context;
         return _managedObjectContext;
     }
-    
-    NSPersistentStoreCoordinator *coordinator = [self persistentStoreCoordinator];
-    if (coordinator != nil) {
-        _managedObjectContext = [[NSManagedObjectContext alloc] initWithConcurrencyType:NSPrivateQueueConcurrencyType];
-        [_managedObjectContext setPersistentStoreCoordinator:coordinator];
-        [_managedObjectContext setMergePolicy:NSMergeByPropertyObjectTrumpMergePolicy];
-    }
-    return _managedObjectContext;
 }
 
-// Returns the managed object model for the application.
-// If the model doesn't already exist, it is created from the application's model.
 - (NSManagedObjectModel *)managedObjectModel
 {
-    if (_managedObjectModel != nil) {
+    @synchronized (self) {
+        if (_managedObjectModel == nil) {
+            _managedObjectModel = [NSManagedObjectModel mergedModelFromBundles:nil];
+        }
         return _managedObjectModel;
     }
-    _managedObjectModel = [NSManagedObjectModel mergedModelFromBundles:nil];
-    return _managedObjectModel;
 }
 
-// Returns the persistent store coordinator for the application.
-// If the coordinator doesn't already exist, it is created and the application's store added to it.
 - (NSPersistentStoreCoordinator *)persistentStoreCoordinator
 {
-    if (_persistentStoreCoordinator != nil) {
+    @synchronized (self) {
+        if (_persistentStoreCoordinator != nil) {
+            return _persistentStoreCoordinator;
+        }
+
+        NSManagedObjectModel *model = self.managedObjectModel;
+        if (model == nil) {
+            Log(LOG_E, @"Unable to open database: the managed object model is unavailable");
+            return nil;
+        }
+
+        NSPersistentStoreCoordinator *coordinator = [[NSPersistentStoreCoordinator alloc] initWithManagedObjectModel:model];
+        NSDictionary *options = @{
+            NSMigratePersistentStoresAutomaticallyOption: @YES,
+            NSInferMappingModelAutomaticallyOption: @YES
+        };
+        NSError *error = nil;
+        if (![coordinator addPersistentStoreWithType:NSSQLiteStoreType
+                                      configuration:nil
+                                                URL:[self getStoreURL]
+                                            options:options
+                                              error:&error]) {
+            // An incompatible model, permissions, a locked store, or a temporary
+            // I/O failure must never erase the user's database or its sidecars.
+            // Leave the cache empty so a later request makes a real open attempt.
+            Log(LOG_E, @"Unable to open database; existing data was preserved: %@, %@", error, error.userInfo);
+            return nil;
+        }
+
+        _persistentStoreCoordinator = coordinator;
         return _persistentStoreCoordinator;
     }
-    
-    NSURL *storeURL = [self getStoreURL];
-    
-    NSError *error = nil;
-    _persistentStoreCoordinator = [[NSPersistentStoreCoordinator alloc] initWithManagedObjectModel:[self managedObjectModel]];
-    NSDictionary *options = [NSDictionary dictionaryWithObjectsAndKeys:
-                             [NSNumber numberWithBool:YES], NSMigratePersistentStoresAutomaticallyOption,
-                             [NSNumber numberWithBool:YES], NSInferMappingModelAutomaticallyOption, nil];
-    if (![_persistentStoreCoordinator addPersistentStoreWithType:NSSQLiteStoreType configuration:nil URL:storeURL options:options error:&error]) {
-        // Log the error
-        Log(LOG_E, @"Critical database error: %@, %@", error, [error userInfo]);
-        
-        // Drop the database
-        [[NSFileManager defaultManager] removeItemAtURL:storeURL error:nil];
-        
-        // Try again
-        return [self persistentStoreCoordinator];
-    }
-    
-    return _persistentStoreCoordinator;
 }
 
 

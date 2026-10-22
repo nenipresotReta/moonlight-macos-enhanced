@@ -14,6 +14,11 @@
 + (NSString*) getUniqueId {
     DataManager* dataMan = [[DataManager alloc] init];
 
+    if (!dataMan.isAvailable) {
+        Log(LOG_E, @"Client identity unavailable because the database could not be opened");
+        return nil;
+    }
+
     NSString* uniqueId = [dataMan getUniqueId];
     if (uniqueId == nil) {
         uniqueId = [IdManager generateUniqueId];

@@ -13,6 +13,9 @@
 
 @interface DataManager : NSObject
 
+// NO means the original store could not be opened; callers must not treat it as a new installation.
+@property (nonatomic, readonly, getter=isAvailable) BOOL available;
+
 - (void) saveSettingsWithBitrate:(NSInteger)bitrate
                        framerate:(NSInteger)framerate
                           height:(NSInteger)height
