@@ -662,45 +662,83 @@ static const double MOUSE_SPEED_DIVISOR = 2.5;
 @synthesize shouldSendInputEvents = _shouldSendInputEvents;
 @synthesize dualSenseTouchpad = _dualSenseTouchpad;
 
+- (BOOL)shouldSendInputEvents {
+    return __atomic_load_n(&_shouldSendInputEvents, __ATOMIC_ACQUIRE);
+}
+
 - (void)setShouldSendInputEvents:(BOOL)enabled {
-    BOOL wasEnabled = _shouldSendInputEvents;
-    _shouldSendInputEvents = enabled;
+    // Serialize admission with sends, but never hold this lock while acquiring
+    // a controller monitor: updateFinished takes the controller monitor first.
+    [_controllerStreamLock lock];
+    BOOL wasEnabled = self.shouldSendInputEvents;
+    __atomic_store_n(&_shouldSendInputEvents, enabled, __ATOMIC_RELEASE);
+    [_controllerStreamLock unlock];
     if (wasEnabled && !enabled) {
         [_dualSenseTouchpad releaseAll];
         for (Controller *controller in _controllers.allValues) {
-            ControllerMenuGesture gesture = controller.menuGesture;
-            ControllerMenuGestureInterrupt(&gesture, controller.gamepad.extendedGamepad.buttonMenu.pressed);
-            controller.menuGesture = gesture;
-        }
-        PML_INPUT_STREAM_CONTEXT input = ControllerInputContext(self);
-        if (input != NULL && LiInputContextIsInitialized(input)) {
-            [_controllerStreamLock lock];
-            for (Controller *controller in _controllers.allValues) {
-                // The host holds the last rotation rate it was given. GameController stops reporting
-                // while the app is not active, so without this a game keeps turning on its own.
-                BOOL gyroRequested = NO;
-                @synchronized (controller) {
-                    gyroRequested = controller.gyroReportRateHz > 0;
+            @synchronized (controller) {
+                ControllerMenuGesture gesture = controller.menuGesture;
+                ControllerMenuGestureInterrupt(&gesture, controller.gamepad.extendedGamepad.buttonMenu.pressed);
+                controller.menuGesture = gesture;
+                [_controllerStreamLock lock];
+                PML_INPUT_STREAM_CONTEXT input = ControllerInputContext(self);
+                if (input != NULL && LiInputContextIsInitialized(input)) {
+                    // The host holds the last rotation rate it was given.
+                    if (controller.gyroReportRateHz > 0) {
+                        LiSendControllerMotionEventCtx(input, (uint8_t)(_multiController ? controller.playerIndex : 0),
+                                                       LI_MOTION_TYPE_GYRO, 0.0f, 0.0f, 0.0f);
+                    }
+                    LiSendMultiControllerEventCtx(input, _multiController ? controller.playerIndex : 0,
+                        _multiController ? (unsigned char)_controllerNumbers : 1, 0, 0, 0, 0, 0, 0, 0);
+                    if (controller.lastMouseModeButtonFlags & A_FLAG)
+                        LiSendMouseButtonEventCtx(input, BUTTON_ACTION_RELEASE, BUTTON_LEFT);
+                    if (controller.lastMouseModeButtonFlags & B_FLAG)
+                        LiSendMouseButtonEventCtx(input, BUTTON_ACTION_RELEASE, BUTTON_RIGHT);
+                    if (controller.trackpadMouseButton != 0)
+                        LiSendMouseButtonEventCtx(input, BUTTON_ACTION_RELEASE, controller.trackpadMouseButton);
                 }
-                if (gyroRequested) {
-                    LiSendControllerMotionEventCtx(input, (uint8_t)(_multiController ? controller.playerIndex : 0),
-                                                   LI_MOTION_TYPE_GYRO, 0.0f, 0.0f, 0.0f);
-                }
-                LiSendMultiControllerEventCtx(input, _multiController ? controller.playerIndex : 0,
-                    _multiController ? (unsigned char)_controllerNumbers : 1, 0, 0, 0, 0, 0, 0, 0);
-                if (controller.trackpadMouseButton != 0)
-                    LiSendMouseButtonEventCtx(input, BUTTON_ACTION_RELEASE, controller.trackpadMouseButton);
+                // Clear bookkeeping even after the stream has gone away.
+                controller.lastMouseModeButtonFlags = 0;
                 controller.hasSentGamepadState = NO;
                 ResetControllerTrackpadMouseState(controller);
+                [_controllerStreamLock unlock];
             }
-            [_controllerStreamLock unlock];
-            Log(LOG_I, @"[controller] Neutral input sent before pausing controller delivery");
         }
+        Log(LOG_I, @"[controller] Neutral input sent before pausing controller delivery");
     } else if (!wasEnabled && enabled) {
         for (Controller *controller in _controllers.allValues) {
             controller.hasSentGamepadState = NO;
             [self updateFinished:controller];
+            if (controller.isMouseMode) {
+                [self evaluateControllerShortcuts:controller];
+                [self updateMouseModeButtons:controller gamepad:controller.gamepad.extendedGamepad];
+            }
         }
+    }
+}
+
+- (void)updateMouseModeButtons:(Controller *)controller gamepad:(GCExtendedGamepad *)gamepad {
+    @synchronized (controller) {
+        [_controllerStreamLock lock];
+        if (!self.shouldSendInputEvents || !controller.isMouseMode) {
+            [_controllerStreamLock unlock];
+            return;
+        }
+        PML_INPUT_STREAM_CONTEXT input = ControllerInputContext(self);
+        if (input == NULL || !LiInputContextIsInitialized(input)) {
+            [_controllerStreamLock unlock];
+            return;
+        }
+        uint32_t consumed = ControllerShortcutProtocolMask(ControllerShortcutRouteConsumed(controller.clientShortcutRouting));
+        int current = (gamepad.buttonA.pressed && !(consumed & A_FLAG) ? A_FLAG : 0) |
+                      (gamepad.buttonB.pressed && !(consumed & B_FLAG) ? B_FLAG : 0);
+        int changed = current ^ controller.lastMouseModeButtonFlags;
+        if (changed & A_FLAG)
+            LiSendMouseButtonEventCtx(input, current & A_FLAG ? BUTTON_ACTION_PRESS : BUTTON_ACTION_RELEASE, BUTTON_LEFT);
+        if (changed & B_FLAG)
+            LiSendMouseButtonEventCtx(input, current & B_FLAG ? BUTTON_ACTION_PRESS : BUTTON_ACTION_RELEASE, BUTTON_RIGHT);
+        controller.lastMouseModeButtonFlags = current;
+        [_controllerStreamLock unlock];
     }
 }
 
@@ -727,30 +765,32 @@ static const double MOUSE_SPEED_DIVISOR = 2.5;
 }
 
 - (void)setGamepadMouseModeActive:(BOOL)active forController:(Controller *)controller {
-    if (controller.isMouseMode == active) return;
-    PML_INPUT_STREAM_CONTEXT input = ControllerInputContext(self);
-    if (input) {
-        if (controller.lastMouseModeButtonFlags & A_FLAG)
-            LiSendMouseButtonEventCtx(input, BUTTON_ACTION_RELEASE, BUTTON_LEFT);
-        if (controller.lastMouseModeButtonFlags & B_FLAG)
-            LiSendMouseButtonEventCtx(input, BUTTON_ACTION_RELEASE, BUTTON_RIGHT);
-    }
-    controller.lastMouseModeButtonFlags = 0;
-    controller.isMouseMode = active;
-    _accumulatedMouseX = 0;
-    _accumulatedMouseY = 0;
-    GCExtendedGamepad *gamepad = controller.gamepad.extendedGamepad;
-    // Restore only controls affected by mouse emulation. Calling the complete
-    // input handler here would also feed a held Menu into its debouncer.
-    @synchronized(controller) {
+    @synchronized (controller) {
+        if (controller.isMouseMode == active) return;
+        [_controllerStreamLock lock];
+        PML_INPUT_STREAM_CONTEXT input = ControllerInputContext(self);
+        if (input != NULL && LiInputContextIsInitialized(input)) {
+            if (controller.lastMouseModeButtonFlags & A_FLAG)
+                LiSendMouseButtonEventCtx(input, BUTTON_ACTION_RELEASE, BUTTON_LEFT);
+            if (controller.lastMouseModeButtonFlags & B_FLAG)
+                LiSendMouseButtonEventCtx(input, BUTTON_ACTION_RELEASE, BUTTON_RIGHT);
+        }
+        controller.lastMouseModeButtonFlags = 0;
+        controller.isMouseMode = active;
+        [_controllerStreamLock unlock];
+        _accumulatedMouseX = 0;
+        _accumulatedMouseY = 0;
+        GCExtendedGamepad *gamepad = controller.gamepad.extendedGamepad;
+        // Restore only controls affected by mouse emulation. Calling the complete
+        // input handler here would also feed a held Menu into its debouncer.
         controller.lastButtonFlags &= ~(A_FLAG | B_FLAG);
         if (!active && gamepad.buttonA.pressed) controller.lastButtonFlags |= A_FLAG;
         if (!active && gamepad.buttonB.pressed) controller.lastButtonFlags |= B_FLAG;
+        [self updateRightStick:controller
+            x:active ? 0 : (short)(gamepad.rightThumbstick.xAxis.value * 0x7FFE)
+            y:active ? 0 : (short)(gamepad.rightThumbstick.yAxis.value * 0x7FFE)];
+        [self updateFinished:controller];
     }
-    [self updateRightStick:controller
-        x:active ? 0 : (short)(gamepad.rightThumbstick.xAxis.value * 0x7FFE)
-        y:active ? 0 : (short)(gamepad.rightThumbstick.yAxis.value * 0x7FFE)];
-    [self updateFinished:controller];
 }
 
 - (void)setGamepadMouseModeEnabled:(BOOL)enabled {
@@ -1088,7 +1128,7 @@ static const double MOUSE_SPEED_DIVISOR = 2.5;
         PML_INPUT_STREAM_CONTEXT inputCtx = ControllerInputContext(strongSelf);
         // Nothing is sent while controller delivery is paused; the pause itself sends a zero
         // rotation so the host does not keep turning at the last rate.
-        if (inputCtx == NULL || !strongSelf->_shouldSendInputEvents) {
+        if (inputCtx == NULL || !strongSelf.shouldSendInputEvents) {
             return;
         }
 
@@ -1235,7 +1275,7 @@ static const double MOUSE_SPEED_DIVISOR = 2.5;
 
 -(void) updateFinished:(Controller*)controller
 {
-    if (!_shouldSendInputEvents) {
+    if (!self.shouldSendInputEvents) {
         return;
     }
 
@@ -1354,7 +1394,7 @@ static const double MOUSE_SPEED_DIVISOR = 2.5;
             [_controllerStreamLock unlock];
             return;
         }
-        if (!_shouldSendInputEvents) { [_controllerStreamLock unlock]; return; }
+        if (!self.shouldSendInputEvents) { [_controllerStreamLock unlock]; return; }
         controller.sentGamepadState = state;
         controller.hasSentGamepadState = YES;
         if (_multiController) {
@@ -1490,31 +1530,7 @@ static const double MOUSE_SPEED_DIVISOR = 2.5;
                 short rightStickX, rightStickY;
                 unsigned char leftTrigger, rightTrigger;
 
-                if (limeController.isMouseMode) {
-                    // Mouse Toggle and Movement are handled by timer
-
-                    // Mouse Clicks (A = Left, B = Right)
-                    BOOL currentA = gamepad.buttonA.pressed && !(ControllerShortcutProtocolMask(ControllerShortcutRouteConsumed(limeController.clientShortcutRouting)) & A_FLAG);
-                    BOOL currentB = gamepad.buttonB.pressed && !(ControllerShortcutProtocolMask(ControllerShortcutRouteConsumed(limeController.clientShortcutRouting)) & B_FLAG);
-                    BOOL lastA = (limeController.lastMouseModeButtonFlags & A_FLAG) != 0;
-                    BOOL lastB = (limeController.lastMouseModeButtonFlags & B_FLAG) != 0;
-                    PML_INPUT_STREAM_CONTEXT inputCtx = ControllerInputContext(self);
-
-                    if (currentA != lastA) {
-                        if (inputCtx) {
-                            LiSendMouseButtonEventCtx(inputCtx, currentA ? BUTTON_ACTION_PRESS : BUTTON_ACTION_RELEASE, BUTTON_LEFT);
-                        }
-                        if (currentA) limeController.lastMouseModeButtonFlags |= A_FLAG;
-                        else limeController.lastMouseModeButtonFlags &= ~A_FLAG;
-                    }
-                    if (currentB != lastB) {
-                        if (inputCtx) {
-                            LiSendMouseButtonEventCtx(inputCtx, currentB ? BUTTON_ACTION_PRESS : BUTTON_ACTION_RELEASE, BUTTON_RIGHT);
-                        }
-                        if (currentB) limeController.lastMouseModeButtonFlags |= B_FLAG;
-                        else limeController.lastMouseModeButtonFlags &= ~B_FLAG;
-                    }
-                }
+                [self updateMouseModeButtons:limeController gamepad:gamepad];
 
                 BOOL suppress = limeController.isMouseMode;
 

@@ -38,6 +38,8 @@ static void LiSendMultiControllerEventCtx(InputContext *ctx, int p, int m, int b
 @end
 @interface Controller : NSObject
 @property int playerIndex;
+@property int lastMouseModeButtonFlags;
+@property BOOL isMouseMode;
 @property ControllerMenuGesture menuGesture;
 @end
 @implementation Controller
@@ -79,6 +81,11 @@ static void LiSendMultiControllerEventCtx(InputContext *ctx, int p, int m, int b
 @end
 /* HELPERS */
 @implementation HIDSupport
+// Controller mouse emulation is covered by tests/controller-pause. These hooks
+// isolate that external sender from the physical-mouse fixture.
+- (void)releaseControllerMouseButtons {}
+- (void)updateControllerMouseButtonsWithRouting:(uint64_t)routing {}
+- (uint64_t)evaluateControllerShortcuts { return 0; }
 @synthesize inputContext = _inputContext;
 - (void)releaseAllModifierKeys {}
 - (void)sendControllerEvent {}

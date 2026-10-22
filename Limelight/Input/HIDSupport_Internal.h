@@ -149,6 +149,8 @@
 - (void)sendControllerEvent;
 - (void)updateGamepadMenuGesture;
 - (void)setGamepadMouseModeActive:(BOOL)active;
+- (void)releaseControllerMouseButtons;
+- (void)updateControllerMouseButtonsWithRouting:(uint64_t)routing;
 - (KeyboardCompatibilityMode)keyboardCompatibilityMode;
 - (BOOL)usesKeyboardCommandToControlCompatibility;
 - (BOOL)usesKeyboardLeftControlWinSwapCompatibility;

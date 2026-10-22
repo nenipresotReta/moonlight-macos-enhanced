@@ -632,37 +632,41 @@ static CVReturn displayLinkOutputCallback(CVDisplayLinkRef displayLink,
             self.lastSubmittedAbsolutePointerBatch = nil;
             self.lastAbsolutePointerReferenceWidth = 0;
             self.lastAbsolutePointerReferenceHeight = 0;
-        }
-        uint32_t pressedMask = self.pressedMouseButtonsMask;
-        if (pressedMask == 0) {
-            return;
-        }
+            // Seal batches and enqueue every cleanup release under one lock.
+            // A concurrent raw report must not create a coalescible batch in
+            // between those operations and move past this release boundary.
+            [self releaseControllerMouseButtons];
+            uint32_t pressedMask = self.pressedMouseButtonsMask;
+            if (pressedMask == 0) {
+                return;
+            }
 
-        self.pressedMouseButtonsMask = 0;
+            self.pressedMouseButtonsMask = 0;
 
-        PML_INPUT_STREAM_CONTEXT inputCtx = HIDInputContext(self);
-        if (HIDValidateInputContext(inputCtx, "releaseAllPressedMouseButtons")) {
-            static const int buttons[] = {
-                BUTTON_LEFT,
-                BUTTON_MIDDLE,
-                BUTTON_RIGHT,
-                BUTTON_X1,
-                BUTTON_X2,
-            };
+            PML_INPUT_STREAM_CONTEXT inputCtx = HIDInputContext(self);
+            if (HIDValidateInputContext(inputCtx, "releaseAllPressedMouseButtons")) {
+                static const int buttons[] = {
+                    BUTTON_LEFT,
+                    BUTTON_MIDDLE,
+                    BUTTON_RIGHT,
+                    BUTTON_X1,
+                    BUTTON_X2,
+                };
 
-            for (NSUInteger index = 0; index < sizeof(buttons) / sizeof(buttons[0]); index++) {
-                int button = buttons[index];
-                if ((pressedMask & HIDMouseButtonBitForButton(button)) == 0) {
-                    continue;
+                for (NSUInteger index = 0; index < sizeof(buttons) / sizeof(buttons[0]); index++) {
+                    int button = buttons[index];
+                    if ((pressedMask & HIDMouseButtonBitForButton(button)) == 0) {
+                        continue;
+                    }
+
+                    HIDDispatchMouseButtonInput(self, inputCtx, NO, ^{
+                        LiSendMouseButtonEventCtx(inputCtx, BUTTON_ACTION_RELEASE, button);
+                    });
+                    [self recordMouseButtonDiagnosticsAction:@"release"
+                                                      button:button
+                                                        mask:self.pressedMouseButtonsMask
+                                                   synthetic:YES];
                 }
-
-                HIDDispatchMouseButtonInput(self, inputCtx, NO, ^{
-                    LiSendMouseButtonEventCtx(inputCtx, BUTTON_ACTION_RELEASE, button);
-                });
-                [self recordMouseButtonDiagnosticsAction:@"release"
-                                                  button:button
-                                                    mask:self.pressedMouseButtonsMask
-                                               synthetic:YES];
             }
         }
     }

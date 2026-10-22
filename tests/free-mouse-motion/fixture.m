@@ -18,7 +18,26 @@ typedef void *PML_CONNECTION_CONTEXT;
 static void LiSetThreadConnectionContext(void *ctx) {}
 static InputContext context;
 static BOOL validContext = YES, hybrid = YES, swapButtons;
-static bool LiInputContextIsInitialized(InputContext *ctx) { return validContext; }
+static dispatch_block_t contextValidationHook;
+static NSLock *validationHookLock(void) {
+    static NSLock *lock;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{ lock = [NSLock new]; });
+    return lock;
+}
+static void setValidationHook(dispatch_block_t hook) {
+    NSLock *lock = validationHookLock();
+    [lock lock]; contextValidationHook = hook; [lock unlock];
+}
+static bool LiInputContextIsInitialized(InputContext *ctx) {
+    NSLock *lock = validationHookLock();
+    [lock lock];
+    dispatch_block_t hook = contextValidationHook;
+    contextValidationHook = nil;
+    [lock unlock];
+    if (hook) hook();
+    return validContext;
+}
 static void *LiInputContextGetConnectionCtx(InputContext *ctx) { return ctx->connectionContext; }
 static void LiSendMultiControllerEventCtx(InputContext *ctx, int p, int m, int b, int l, int r, int x, int y, int z, int w) {}
 static NSString *mouseMode = @"remote";
@@ -40,6 +59,8 @@ static void LiSendMouseButtonEventCtx(InputContext *ctx, int action, int button)
 @end
 @interface Controller : NSObject
 @property int playerIndex;
+@property int lastMouseModeButtonFlags;
+@property BOOL isMouseMode;
 @property ControllerMenuGesture menuGesture;
 @end
 @implementation Controller
@@ -107,6 +128,10 @@ static BOOL HIDAbsoluteMousePayloadForEvent(NSEvent *e, BOOL c, short *x, short 
 }
 /* HELPERS */
 @implementation HIDSupport
+// Controller mouse emulation is exercised by tests/controller-pause.
+- (void)releaseControllerMouseButtons {}
+- (void)updateControllerMouseButtonsWithRouting:(uint64_t)routing {}
+- (uint64_t)evaluateControllerShortcuts { return 0; }
 @synthesize inputContext = _inputContext;
 - (void)releaseAllModifierKeys {}
 - (void)sendControllerEvent {}
@@ -273,6 +298,32 @@ static void queueTests(void) {
     resumeQueue(released, gate);
     expect(@[@"2:1", @1200, @"1:1", @"2:1"]);
     puts("PASS: synthetic release seals motion batches and recapture resends a cancelled click position");
+
+    HIDSupport *racing = support();
+    [racing setFreeMouseVirtualCursorActive:NO];
+    gate = pauseQueue(racing);
+    [racing mouseDown:nil withButton:BUTTON_LEFT];
+    dispatch_semaphore_t rawStarted = dispatch_semaphore_create(0);
+    dispatch_semaphore_t rawDone = dispatch_semaphore_create(0);
+    setValidationHook(^{
+        dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+            dispatch_semaphore_signal(rawStarted);
+            coalesced(racing, 110);
+            dispatch_semaphore_signal(rawDone);
+        });
+        assert(dispatch_semaphore_wait(rawStarted, dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC)) == 0);
+        // The old implementation lets raw input submit in the cleanup gap.
+        // The fixed implementation holds the batch lock, so this worker resumes
+        // only after cleanup returns. The timeout bounds that intentional wait.
+        if (dispatch_semaphore_wait(rawDone, dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC)) == 0)
+            dispatch_semaphore_signal(rawDone);
+    });
+    [racing releaseAllPressedMouseButtons];
+    assert(dispatch_semaphore_wait(rawDone, dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC)) == 0);
+    coalesced(racing, 120);
+    resumeQueue(racing, gate);
+    expect(@[@"2:1", @960]);
+    puts("PASS: concurrent coalescing cannot move a later position ahead of synthetic release");
 }
 static void isolationTests(void) {
     HIDSupport *s = support();

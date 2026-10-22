@@ -489,13 +489,19 @@ static short HIDVirtualKeyForTypedCharacter(UniChar character) {
             self.controller.menuGesture = gesture;
         }
         __atomic_store_n(&_shouldSendInputEvents, enabled, __ATOMIC_RELEASE);
-        if (!wasEnabled && enabled && self.controllerDriver == 0) [self sendControllerEvent];
+        if (!wasEnabled && enabled && self.controllerDriver == 0) {
+            if (self.controller.isMouseMode)
+                [self updateControllerMouseButtonsWithRouting:[self evaluateControllerShortcuts]];
+            else
+                [self sendControllerEvent];
+        }
     }
 }
 
 - (void)setInputContext:(void *)inputContext {
     @synchronized (self) {
         if (_inputContext != inputContext) {
+            self.controller.lastMouseModeButtonFlags = 0;
             self.mouseButtonInputGeneration += 1;
             self.mouseButtonContextGeneration += 1;
             self.pressedMouseButtonsMask = 0;
@@ -2470,33 +2476,68 @@ void myHIDDeviceRemovalCallback(void * _Nullable        context,
 - (void)toggleControllerMouseMode { [self setGamepadMouseModeActive:!self.controller.isMouseMode]; }
 
 
-- (void)setGamepadMouseModeActive:(BOOL)active {
-    if (self.controller.isMouseMode == active) return;
-    PML_INPUT_STREAM_CONTEXT input = HIDInputContext(self);
-    int heldMouseButtons = self.controller.lastMouseModeButtonFlags;
-    if (input && self.shouldSendInputEvents) {
-        int player = self.controller.playerIndex;
-        HIDDispatchInput(self, input, ^{
-            if (heldMouseButtons & A_FLAG)
-                LiSendMouseButtonEventCtx(input, BUTTON_ACTION_RELEASE, BUTTON_LEFT);
-            if (heldMouseButtons & B_FLAG)
-                LiSendMouseButtonEventCtx(input, BUTTON_ACTION_RELEASE, BUTTON_RIGHT);
-            if (active)
-                LiSendMultiControllerEventCtx(input, player, 1, 0, 0, 0, 0, 0, 0, 0);
-        });
+- (void)releaseControllerMouseButtons {
+    @synchronized (self) {
+        int held = self.controller.lastMouseModeButtonFlags;
+        self.controller.lastMouseModeButtonFlags = 0;
+        if ((held & (A_FLAG | B_FLAG)) == 0) return;
+        PML_INPUT_STREAM_CONTEXT input = HIDInputContext(self);
+        if (!HIDValidateInputContext(input, "release-controller-mouse")) return;
+        if (held & A_FLAG)
+            HIDDispatchMouseButtonInput(self, input, NO, ^{ LiSendMouseButtonEventCtx(input, BUTTON_ACTION_RELEASE, BUTTON_LEFT); });
+        if (held & B_FLAG)
+            HIDDispatchMouseButtonInput(self, input, NO, ^{ LiSendMouseButtonEventCtx(input, BUTTON_ACTION_RELEASE, BUTTON_RIGHT); });
     }
-    self.controller.isMouseMode = active;
-    self.controller.lastMouseModeButtonFlags = 0;
-    if (!active) self.controller.lastButtonFlags |= heldMouseButtons & (A_FLAG | B_FLAG);
-    self.controller.primaryTouchActive = NO;
-    self.controller.secondaryTouchActive = NO;
-    self.controller.trackpadMouseAccumulatedX = 0;
-    self.controller.trackpadMouseAccumulatedY = 0;
-    self.controller.trackpadScrollAccumulatedY = 0;
-    self.controller.trackpadMouseButton = 0;
-    [[NSNotificationCenter defaultCenter] postNotificationName:HIDMouseModeToggledNotification
-        object:nil userInfo:@{@"enabled": @(active)}];
-    if (!active && self.controllerDriver == 0) [self sendControllerEvent];
+}
+
+- (void)updateControllerMouseButtonsWithRouting:(uint64_t)routing {
+    @synchronized (self) {
+        if (!self.shouldSendInputEvents || self.controllerDriver != 0 || !self.controller.isMouseMode) return;
+        PML_INPUT_STREAM_CONTEXT input = HIDInputContext(self);
+        if (!HIDValidateInputContext(input, "controller-mouse")) return;
+        uint32_t consumed = ControllerShortcutProtocolMask(ControllerShortcutRouteConsumed(routing));
+        int current = self.controllerShortcutPhysicalButtons & ~consumed & (A_FLAG | B_FLAG);
+        int changed = current ^ self.controller.lastMouseModeButtonFlags;
+        if (changed & A_FLAG) {
+            BOOL pressed = (current & A_FLAG) != 0;
+            HIDDispatchMouseButtonInput(self, input, pressed, ^{
+                LiSendMouseButtonEventCtx(input, pressed ? BUTTON_ACTION_PRESS : BUTTON_ACTION_RELEASE, BUTTON_LEFT);
+            });
+        }
+        if (changed & B_FLAG) {
+            BOOL pressed = (current & B_FLAG) != 0;
+            HIDDispatchMouseButtonInput(self, input, pressed, ^{
+                LiSendMouseButtonEventCtx(input, pressed ? BUTTON_ACTION_PRESS : BUTTON_ACTION_RELEASE, BUTTON_RIGHT);
+            });
+        }
+        self.controller.lastMouseModeButtonFlags = current;
+    }
+}
+
+- (void)setGamepadMouseModeActive:(BOOL)active {
+    @synchronized (self) {
+        if (self.controller.isMouseMode == active) return;
+        [self releaseControllerMouseButtons];
+        PML_INPUT_STREAM_CONTEXT input = HIDInputContext(self);
+        if (active && self.shouldSendInputEvents && HIDValidateInputContext(input, "controller-mouse-mode")) {
+            int player = self.controller.playerIndex;
+            HIDDispatchInput(self, input, ^{
+                LiSendMultiControllerEventCtx(input, player, 1, 0, 0, 0, 0, 0, 0, 0);
+            });
+        }
+        self.controller.isMouseMode = active;
+        self.controller.lastButtonFlags &= ~(A_FLAG | B_FLAG);
+        if (!active) self.controller.lastButtonFlags |= self.controllerShortcutPhysicalButtons & (A_FLAG | B_FLAG);
+        self.controller.primaryTouchActive = NO;
+        self.controller.secondaryTouchActive = NO;
+        self.controller.trackpadMouseAccumulatedX = 0;
+        self.controller.trackpadMouseAccumulatedY = 0;
+        self.controller.trackpadScrollAccumulatedY = 0;
+        self.controller.trackpadMouseButton = 0;
+        [[NSNotificationCenter defaultCenter] postNotificationName:HIDMouseModeToggledNotification
+            object:nil userInfo:@{@"enabled": @(active)}];
+        if (!active && self.controllerDriver == 0) [self sendControllerEvent];
+    }
 }
 
 - (void)updateGamepadMenuGesture {
@@ -2529,75 +2570,36 @@ void myHIDDeviceRemovalCallback(void * _Nullable        context,
 }
 
 - (void)updateButtonFlags:(int)flag state:(BOOL)set {
-    if (set) self.controllerShortcutPhysicalButtons |= flag;
-    else self.controllerShortcutPhysicalButtons &= ~flag;
-    uint64_t routing = [self evaluateControllerShortcuts];
-    if (ControllerShortcutProtocolMask(ControllerShortcutRouteConsumed(routing)) & flag) set = NO;
-    if (flag == PLAY_FLAG) {
-        self.gamepadMenuPressed = set;
-        [self updateGamepadMenuGesture];
-        set = set && !self.controller.menuGesture.consumed;
-    }
-    
-    // Mouse Click Logic
-    if (self.controller.isMouseMode) {
-        if (flag == A_FLAG) {
-            // Left Click
-            BOOL wasPressed = (self.controller.lastMouseModeButtonFlags & A_FLAG) != 0;
-            if (set == wasPressed) return;
-            if (set) self.controller.lastMouseModeButtonFlags |= A_FLAG;
-            else self.controller.lastMouseModeButtonFlags &= ~A_FLAG;
-            if (set) {
-                 PML_INPUT_STREAM_CONTEXT inputCtx = HIDInputContext(self);
-                 if (!inputCtx) {
-                     return;
-                 }
-                HIDDispatchInput(self, inputCtx, ^{ LiSendMouseButtonEventCtx(inputCtx, BUTTON_ACTION_PRESS, BUTTON_LEFT); });
-            } else {
-                 PML_INPUT_STREAM_CONTEXT inputCtx = HIDInputContext(self);
-                 if (!inputCtx) {
-                     return;
-                 }
-                 HIDDispatchInput(self, inputCtx, ^{ LiSendMouseButtonEventCtx(inputCtx, BUTTON_ACTION_RELEASE, BUTTON_LEFT); });
-            }
-            return; // Don't set flag
+    @synchronized (self) {
+        if (set) self.controllerShortcutPhysicalButtons |= flag;
+        else self.controllerShortcutPhysicalButtons &= ~flag;
+        uint64_t routing = [self evaluateControllerShortcuts];
+        if (ControllerShortcutProtocolMask(ControllerShortcutRouteConsumed(routing)) & flag) set = NO;
+        if (flag == PLAY_FLAG) {
+            self.gamepadMenuPressed = set;
+            [self updateGamepadMenuGesture];
+            set = set && !self.controller.menuGesture.consumed;
         }
-        if (flag == B_FLAG) {
-            // Right Click
-            BOOL wasPressed = (self.controller.lastMouseModeButtonFlags & B_FLAG) != 0;
-            if (set == wasPressed) return;
-            if (set) self.controller.lastMouseModeButtonFlags |= B_FLAG;
-            else self.controller.lastMouseModeButtonFlags &= ~B_FLAG;
-            if (set) {
-                 PML_INPUT_STREAM_CONTEXT inputCtx = HIDInputContext(self);
-                 if (!inputCtx) {
-                     return;
-                 }
-                 HIDDispatchInput(self, inputCtx, ^{ LiSendMouseButtonEventCtx(inputCtx, BUTTON_ACTION_PRESS, BUTTON_RIGHT); });
-            } else {
-                 PML_INPUT_STREAM_CONTEXT inputCtx = HIDInputContext(self);
-                 if (!inputCtx) {
-                     return;
-                 }
-                 HIDDispatchInput(self, inputCtx, ^{ LiSendMouseButtonEventCtx(inputCtx, BUTTON_ACTION_RELEASE, BUTTON_RIGHT); });
-            }
-            return; // Don't set flag
-        }
-    }
 
-    if (set) {
-        self.controller.lastButtonFlags |= flag;
-    } else {
-        self.controller.lastButtonFlags &= ~flag;
-    }
-    
-    // Gamepad Quit Combo (Start + Select + LB + RB)
-    int quitCombo = PLAY_FLAG | BACK_FLAG | LB_FLAG | RB_FLAG;
-    if (self.controllerShortcutHandler == nil && (self.controller.lastButtonFlags & quitCombo) == quitCombo) {
-        dispatch_async(dispatch_get_main_queue(), ^{
-            [[NSNotificationCenter defaultCenter] postNotificationName:HIDGamepadQuitNotification object:nil];
-        });
-        self.controller.lastButtonFlags = 0;
+        if (self.controller.isMouseMode && (flag == A_FLAG || flag == B_FLAG)) {
+            [self updateControllerMouseButtonsWithRouting:routing];
+            return; // A/B are mouse buttons, not gamepad buttons, in this mode.
+        }
+
+        if (set) {
+            self.controller.lastButtonFlags |= flag;
+        } else {
+            self.controller.lastButtonFlags &= ~flag;
+        }
+
+        // Gamepad Quit Combo (Start + Select + LB + RB)
+        int quitCombo = PLAY_FLAG | BACK_FLAG | LB_FLAG | RB_FLAG;
+        if (self.controllerShortcutHandler == nil && (self.controller.lastButtonFlags & quitCombo) == quitCombo) {
+            dispatch_async(dispatch_get_main_queue(), ^{
+                [[NSNotificationCenter defaultCenter] postNotificationName:HIDGamepadQuitNotification object:nil];
+            });
+            self.controller.lastButtonFlags = 0;
+        }
     }
 }
 
