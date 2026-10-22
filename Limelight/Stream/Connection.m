@@ -436,6 +436,11 @@ typedef NS_ENUM(NSInteger, MLAudioRendererBackend) {
 #endif
     dispatch_queue_t _clipboardControlQueue;
     BOOL _connectionLayoutCompatible;
+    int32_t _hasTerminated; // Atomic; set before asynchronous teardown begins.
+}
+
+- (BOOL)hasTerminated {
+    return __atomic_load_n(&_hasTerminated, __ATOMIC_ACQUIRE) != 0;
 }
 
 - (uint64_t)audioUnderrunCount {
@@ -4168,6 +4173,10 @@ void ClSetHdrMode(bool enabled, void *hdrMetadata)
 
 void ClConnectionTerminated(int errorCode)
 {
+    Connection *conn = CurrentConnection();
+    if (conn != nil) {
+        __atomic_store_n(&conn->_hasTerminated, 1, __ATOMIC_RELEASE);
+    }
 #if defined(LI_MIC_CONTROL_START)
     // Capture a weak reference to avoid retaining the connection if it's being deallocated
     __weak Connection *weakMicConn = CurrentConnection();
@@ -4180,7 +4189,6 @@ void ClConnectionTerminated(int errorCode)
         }
     });
 #endif
-    Connection *conn = CurrentConnection();
     id<ConnectionCallbacks> callbacks = ConnectionGetCallbacksSnapshot(conn);
     if (callbacks) {
         [callbacks connectionTerminated: errorCode];
@@ -4384,6 +4392,7 @@ void ClClipboardDataReceived(const uint8_t *data, uint32_t length)
 
 -(void) terminate
 {
+    __atomic_store_n(&_hasTerminated, 1, __ATOMIC_RELEASE);
     if (!_connectionLayoutCompatible) {
         UnregisterConnection(&_connectionContext);
         return;
@@ -5222,6 +5231,9 @@ void ClClipboardDataReceived(const uint8_t *data, uint32_t length)
 #if defined(LI_MIC_CONTROL_START)
 - (void)startMicrophoneIfNeeded
 {
+    if (self.hasTerminated) {
+        return;
+    }
     if (!_streamConfig.enableMic) {
         Log(LOG_I, @"Microphone disabled in settings, skipping mic start");
         return;
@@ -5249,7 +5261,7 @@ void ClClipboardDataReceived(const uint8_t *data, uint32_t length)
     }
 
     dispatch_async(dispatch_get_main_queue(), ^{
-        if (self->_micStopping || !self->_streamConfig.enableMic) {
+        if (self.hasTerminated || self->_micStopping || !self->_streamConfig.enableMic) {
             Log(LOG_I, @"Microphone start skipped because capture is stopping");
             return;
         }
@@ -5300,7 +5312,7 @@ void ClClipboardDataReceived(const uint8_t *data, uint32_t length)
 
 - (void)startMicrophoneEngineLocked
 {
-    if (_micStopping || !_streamConfig.enableMic) {
+    if (self.hasTerminated || _micStopping || !_streamConfig.enableMic) {
         return;
     }
 

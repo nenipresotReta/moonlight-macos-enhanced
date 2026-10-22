@@ -236,6 +236,8 @@ static const NSTimeInterval MLControlCenterRefreshIntervalSec = 0.5;
 static const NSTimeInterval MLStatsOverlayRefreshIntervalSec = 0.5;
 
 @protocol MLStreamScopedCallbackOwner <ConnectionCallbacks>
+- (void)connectionStartedForGeneration:(NSUInteger)generation connection:(Connection *)connection;
+- (void)stageComplete:(const char *)stageName forGeneration:(NSUInteger)generation connection:(Connection *)connection;
 - (BOOL)isActiveStreamGeneration:(NSUInteger)generation;
 @end
 
@@ -561,7 +563,10 @@ static const NSTimeInterval MLStatsOverlayRefreshIntervalSec = 0.5;
 - (void)prepareForStreaming;
 // Logs the "[startup] first frame" timeline once per stream attempt.
 - (void)logStartupSummary;
-- (void)scheduleInitialRenderedFrameCheckForGeneration:(NSUInteger)generation remainingAttempts:(NSUInteger)remainingAttempts;
+- (void)handleFirstFramePresentedForGeneration:(NSUInteger)generation connection:(Connection *)connection;
+- (void)scheduleInitialRenderedFrameCheckForGeneration:(NSUInteger)generation connection:(Connection *)connection remainingAttempts:(NSUInteger)remainingAttempts;
+- (BOOL)isCurrentStartupConnection:(Connection *)connection generation:(NSUInteger)generation;
+- (void)retryInputBindingForConnection:(Connection *)connection generation:(NSUInteger)generation remainingAttempts:(NSUInteger)remainingAttempts;
 - (void)stageStarting:(const char *)stageName;
 - (void)stageComplete:(const char *)stageName;
 - (void)connectionStarted;
