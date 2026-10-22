@@ -3,9 +3,108 @@
 
 #import "../Utility/Logger.h"
 
+#import <poll.h>
+#import <signal.h>
+#import <unistd.h>
+#import <errno.h>
+#import <limits.h>
+#import <math.h>
+
 static NSString * const MLRemoteUSBErrorDomain = @"com.skyhua.moonlight.remote-usb";
 static const NSUInteger kMLRemoteUSBMaxLineBytes = 4096;
 static const NSTimeInterval kMLRemoteUSBStartupTimeout = 12.0;
+
+// Each request owns its cancellation pipe. Closing the writer wakes a blocked
+// poll immediately without closing/reusing a descriptor from another thread.
+@interface MLRemoteUSBOperation : NSObject
+@property(nonatomic, strong) NSPipe *cancellationPipe;
+@property(atomic, getter=isCancelled) BOOL cancelled;
+- (void)cancel;
+@end
+
+@implementation MLRemoteUSBOperation
+- (instancetype)init {
+    if ((self = [super init])) _cancellationPipe = [NSPipe pipe];
+    return self;
+}
+- (void)cancel {
+    @synchronized (self) {
+        if (self.cancelled) return;
+        self.cancelled = YES;
+        [self.cancellationPipe.fileHandleForWriting closeFile];
+    }
+}
+@end
+
+// Read only bytes poll has made available. NSFileHandle.availableData and
+// readDataToEndOfFile can block beyond a deadline, even for a partial line.
+static NSData *MLRemoteUSBReadOutput(NSFileHandle *handle, MLRemoteUSBOperation *operation,
+                                    NSTimeInterval timeout, NSUInteger limit, BOOL firstLine) {
+    NSMutableData *data = [NSMutableData data];
+    NSTimeInterval deadline = NSProcessInfo.processInfo.systemUptime + timeout;
+    struct pollfd descriptors[] = {
+        { handle.fileDescriptor, POLLIN, 0 },
+        { operation.cancellationPipe.fileHandleForReading.fileDescriptor, POLLIN, 0 }
+    };
+    while (!operation.cancelled) {
+        NSTimeInterval remaining = deadline - NSProcessInfo.processInfo.systemUptime;
+        if (remaining <= 0) return nil;
+        int milliseconds = (int)MIN(ceil(remaining * 1000.0), (double)INT_MAX);
+        int result = poll(descriptors, 2, milliseconds);
+        if (result < 0 && errno == EINTR) continue;
+        if (result <= 0 || descriptors[1].revents || operation.cancelled) return nil;
+        if (descriptors[0].revents & (POLLERR | POLLNVAL)) return nil;
+        if (!(descriptors[0].revents & (POLLIN | POLLHUP))) continue;
+        uint8_t buffer[4096];
+        ssize_t count = read(descriptors[0].fd, buffer, sizeof(buffer));
+        if (count < 0 && errno == EINTR) continue;
+        if (count < 0) return nil;
+        if (count == 0) return data; // Preserve helpers that close stdout without a final newline.
+        const uint8_t *newline = firstLine ? memchr(buffer, '\n', (size_t)count) : NULL;
+        NSUInteger length = newline ? (NSUInteger)(newline - buffer) : (NSUInteger)count;
+        if (length > limit - data.length) return nil;
+        [data appendBytes:buffer length:length];
+        if (newline) return data;
+    }
+    return nil;
+}
+
+static NSPipe *MLRemoteUSBObserveTaskExit(NSTask *task) {
+    NSPipe *exited = [NSPipe pipe];
+    task.terminationHandler = ^(NSTask *finishedTask) {
+        (void)finishedTask;
+        [exited.fileHandleForWriting closeFile];
+    };
+    return exited;
+}
+
+static void MLRemoteUSBWaitForTaskExit(NSPipe *exited, MLRemoteUSBOperation *operation,
+                                      NSTimeInterval timeout) {
+    NSTimeInterval deadline = NSProcessInfo.processInfo.systemUptime + timeout;
+    struct pollfd descriptors[] = {
+        { exited.fileHandleForReading.fileDescriptor, POLLIN, 0 },
+        { operation ? operation.cancellationPipe.fileHandleForReading.fileDescriptor : -1, POLLIN, 0 }
+    };
+    while (!operation.cancelled) {
+        NSTimeInterval remaining = deadline - NSProcessInfo.processInfo.systemUptime;
+        if (remaining <= 0) return;
+        int result = poll(descriptors, 2, (int)MIN(ceil(remaining * 1000.0), (double)INT_MAX));
+        if (result < 0 && errno == EINTR) continue;
+        return;
+    }
+}
+
+static void MLRemoteUSBTerminateTask(NSTask *task, NSPipe *exited) {
+    if (task == nil || !task.running) return;
+    [task terminate];
+    MLRemoteUSBWaitForTaskExit(exited, nil, 0.25);
+    if (task.running) {
+        kill(task.processIdentifier, SIGKILL);
+        // NSTask reaps the child. Even a broken helper cannot hold the serial
+        // queue indefinitely; no waitUntilExit is used during teardown.
+        MLRemoteUSBWaitForTaskExit(exited, nil, 1.0);
+    }
+}
 
 static NSError *MLRemoteUSBError(NSInteger code, NSString *message) {
     return [NSError errorWithDomain:MLRemoteUSBErrorDomain
@@ -134,6 +233,8 @@ static id MLRemoteUSBJSONObjectFromData(NSData *data, NSError **errorOut) {
 @property(nonatomic, strong, nullable) NSPipe *exporterInput;
 @property(nonatomic, strong, nullable) MLRemoteUSBReverseTunnel *tunnel;
 @property(nonatomic) dispatch_queue_t workerQueue;
+@property(nonatomic, strong, nullable) MLRemoteUSBOperation *operation;
+@property(nonatomic, strong, nullable) NSPipe *exporterExited;
 @end
 
 @implementation MLRemoteUSBForwardingSession
@@ -172,89 +273,110 @@ static id MLRemoteUSBJSONObjectFromData(NSData *data, NSError **errorOut) {
     return bundlePath ?: @"";
 }
 
-- (void)refreshDevicesWithCompletion:(void (^)(NSArray<MLRemoteUSBDevice *> *, NSError *))completion {
-    dispatch_async(self.workerQueue, ^{
-        self.state = MLRemoteUSBForwardingStateEnumerating;
-        self.error = nil;
+// Submission and cancellation use one lock so their worker-queue ordering is
+// identical to their request ordering. Long-running work never holds this lock.
+- (void)enqueueOperation:(void (^)(MLRemoteUSBOperation *operation))work {
+    @synchronized (self) {
+        [self.operation cancel];
+        MLRemoteUSBOperation *operation = [[MLRemoteUSBOperation alloc] init];
+        self.operation = operation;
+        dispatch_async(self.workerQueue, ^{
+            if (![self isCurrentOperation:operation]) return;
+            [self stopSessionLocked];
+            if ([self isCurrentOperation:operation]) work(operation);
+        });
+    }
+}
 
-        NSString *helperPath = [self helperPath];
-        if (helperPath.length == 0 || ![[NSFileManager defaultManager] isExecutableFileAtPath:helperPath]) {
-            NSError *error = MLRemoteUSBError(1, @"The macOS USB/IP exporter is not installed");
-            self.state = MLRemoteUSBForwardingStateFailed;
-            self.error = error;
-            dispatch_async(dispatch_get_main_queue(), ^{ completion(@[], error); });
-            return;
-        }
+- (BOOL)isCurrentOperation:(MLRemoteUSBOperation *)operation {
+    @synchronized (self) {
+        return self.operation == operation && !operation.cancelled;
+    }
+}
 
-        NSTask *task = [[NSTask alloc] init];
-        NSPipe *stdoutPipe = [NSPipe pipe];
-        task.executableURL = [NSURL fileURLWithPath:helperPath];
-        task.arguments = @[@"list", @"--json"];
-        task.standardOutput = stdoutPipe;
-        task.standardError = [NSPipe pipe];
-        NSError *launchError = nil;
-        if (![task launchAndReturnError:&launchError]) {
-            self.state = MLRemoteUSBForwardingStateFailed;
-            self.error = launchError ?: MLRemoteUSBError(2, @"Unable to start the macOS USB/IP exporter");
-            NSError *error = self.error;
-            dispatch_async(dispatch_get_main_queue(), ^{ completion(@[], error); });
-            return;
+- (void)deliverForOperation:(MLRemoteUSBOperation *)operation completion:(void (^)(void))completion {
+    dispatch_async(dispatch_get_main_queue(), ^{
+        @synchronized (self) {
+            if ([self isCurrentOperation:operation]) completion();
         }
-
-        NSData *data = [stdoutPipe.fileHandleForReading readDataToEndOfFile];
-        [task waitUntilExit];
-        if (data.length > kMLRemoteUSBMaxLineBytes * 128 || task.terminationStatus != 0) {
-            NSError *error = MLRemoteUSBError(3, @"The USB/IP exporter returned an invalid device list");
-            self.state = MLRemoteUSBForwardingStateFailed;
-            self.error = error;
-            dispatch_async(dispatch_get_main_queue(), ^{ completion(@[], error); });
-            return;
-        }
-
-        NSError *jsonError = nil;
-        id object = MLRemoteUSBJSONObjectFromData(data, &jsonError);
-        if (![object isKindOfClass:NSArray.class]) {
-            NSError *error = jsonError ?: MLRemoteUSBError(4, @"The USB/IP exporter returned malformed JSON");
-            self.state = MLRemoteUSBForwardingStateFailed;
-            self.error = error;
-            dispatch_async(dispatch_get_main_queue(), ^{ completion(@[], error); });
-            return;
-        }
-
-        NSMutableArray *devices = [NSMutableArray array];
-        for (NSDictionary *entry in (NSArray *)object) {
-            if (![entry isKindOfClass:NSDictionary.class]) continue;
-            MLRemoteUSBDevice *device = [[MLRemoteUSBDevice alloc] initWithDictionary:entry];
-            if (device.busID.length > 0 && !device.isHub) [devices addObject:device];
-        }
-        self.devices = devices.copy;
-        self.state = MLRemoteUSBForwardingStateIdle;
-        NSArray *result = self.devices;
-        dispatch_async(dispatch_get_main_queue(), ^{ completion(result, nil); });
     });
 }
 
-- (void)startExporterForDevice:(MLRemoteUSBDevice *)device
-                    completion:(void (^)(uint16_t, NSError *))completion {
-    if (device == nil || device.busID.length == 0 || !device.claimable) {
-        NSError *error = MLRemoteUSBError(5, @"The selected USB device cannot be claimed by macOS");
-        completion(0, error);
-        return;
-    }
-
-    dispatch_async(self.workerQueue, ^{
-        [self stopExporterLocked];
-        self.state = MLRemoteUSBForwardingStateStartingHelper;
+- (void)refreshDevicesWithCompletion:(void (^)(NSArray<MLRemoteUSBDevice *> *, NSError *))completion {
+    [self enqueueOperation:^(MLRemoteUSBOperation *operation) {
+        self.state = MLRemoteUSBForwardingStateEnumerating;
         self.error = nil;
         NSString *helperPath = [self helperPath];
-        if (helperPath.length == 0) {
-            NSError *error = MLRemoteUSBError(6, @"The macOS USB/IP exporter is not installed");
-            self.state = MLRemoteUSBForwardingStateFailed;
-            self.error = error;
-            dispatch_async(dispatch_get_main_queue(), ^{ completion(0, error); });
-            return;
+        NSError *error = nil;
+        NSArray *result = @[];
+        NSTask *task = nil;
+        NSPipe *exited = nil;
+        if (helperPath.length == 0 || ![[NSFileManager defaultManager] isExecutableFileAtPath:helperPath]) {
+            error = MLRemoteUSBError(1, @"The macOS USB/IP exporter is not installed");
+        } else {
+            task = [[NSTask alloc] init];
+            NSPipe *output = [NSPipe pipe];
+            task.executableURL = [NSURL fileURLWithPath:helperPath];
+            task.arguments = @[@"list", @"--json"];
+            task.standardOutput = output;
+            // An unread stderr pipe can fill and deadlock before stdout arrives.
+            task.standardError = NSFileHandle.fileHandleWithNullDevice;
+            exited = MLRemoteUSBObserveTaskExit(task);
+            if (![task launchAndReturnError:&error]) {
+                error = error ?: MLRemoteUSBError(2, @"Unable to start the macOS USB/IP exporter");
+            } else {
+                NSTimeInterval deadline = NSProcessInfo.processInfo.systemUptime + kMLRemoteUSBStartupTimeout;
+                NSData *data = MLRemoteUSBReadOutput(output.fileHandleForReading, operation,
+                                                     kMLRemoteUSBStartupTimeout, kMLRemoteUSBMaxLineBytes * 128, NO);
+                // EOF does not guarantee process exit. A helper may close stdout
+                // and then hang, so the remaining wait shares the same budget.
+                NSTimeInterval remaining = MAX(0, deadline - NSProcessInfo.processInfo.systemUptime);
+                if (data != nil && !operation.cancelled && task.running) {
+                    MLRemoteUSBWaitForTaskExit(exited, operation, remaining);
+                }
+                if (data == nil || task.running || task.terminationStatus != 0) {
+                    error = MLRemoteUSBError(3, @"The USB/IP exporter returned an invalid device list or timed out");
+                } else {
+                    id object = MLRemoteUSBJSONObjectFromData(data, &error);
+                    if ([object isKindOfClass:NSArray.class]) {
+                        NSMutableArray *devices = [NSMutableArray array];
+                        for (NSDictionary *entry in (NSArray *)object) {
+                            if (![entry isKindOfClass:NSDictionary.class]) continue;
+                            MLRemoteUSBDevice *device = [[MLRemoteUSBDevice alloc] initWithDictionary:entry];
+                            if (device.busID.length > 0 && !device.isHub) [devices addObject:device];
+                        }
+                        result = devices.copy;
+                    } else {
+                        error = error ?: MLRemoteUSBError(4, @"The USB/IP exporter returned malformed JSON");
+                    }
+                }
+            }
         }
+        MLRemoteUSBTerminateTask(task, exited);
+        if (![self isCurrentOperation:operation]) return;
+        self.error = error;
+        self.state = error ? MLRemoteUSBForwardingStateFailed : MLRemoteUSBForwardingStateIdle;
+        if (!error) self.devices = result;
+        [self deliverForOperation:operation completion:^{ completion(result, error); }];
+    }];
+}
 
+// Runs on workerQueue and reports there; the public methods guard delivery to
+// the main queue, including the gap between READY and starting the tunnel.
+- (void)startExporterForDevice:(MLRemoteUSBDevice *)device
+                    operation:(MLRemoteUSBOperation *)operation
+                   completion:(void (^)(uint16_t, NSError *))completion {
+    self.state = MLRemoteUSBForwardingStateStartingHelper;
+    self.error = nil;
+    NSError *error = nil;
+    if (device == nil || device.busID.length == 0 || !device.claimable) {
+        error = MLRemoteUSBError(5, @"The selected USB device cannot be claimed by macOS");
+    }
+    NSString *helperPath = [self helperPath];
+    if (!error && helperPath.length == 0) {
+        error = MLRemoteUSBError(6, @"The macOS USB/IP exporter is not installed");
+    }
+    if (!error) {
         NSTask *task = [[NSTask alloc] init];
         NSPipe *input = [NSPipe pipe];
         NSPipe *output = [NSPipe pipe];
@@ -262,64 +384,58 @@ static id MLRemoteUSBJSONObjectFromData(NSData *data, NSError **errorOut) {
         task.arguments = @[@"serve", @"--bind", device.busID, @"--listen", @"127.0.0.1:0"];
         task.standardInput = input;
         task.standardOutput = output;
-        task.standardError = [NSPipe pipe];
-        NSError *launchError = nil;
-        if (![task launchAndReturnError:&launchError]) {
-            self.state = MLRemoteUSBForwardingStateFailed;
-            self.error = launchError ?: MLRemoteUSBError(7, @"Unable to start the USB/IP exporter");
-            NSError *error = self.error;
-            dispatch_async(dispatch_get_main_queue(), ^{ completion(0, error); });
-            return;
-        }
-
-        self.exporter = task;
-        self.exporterInput = input;
-        NSData *lineData = [self readLineFromHandle:output.fileHandleForReading timeout:kMLRemoteUSBStartupTimeout];
-        NSString *line = [[NSString alloc] initWithData:lineData encoding:NSUTF8StringEncoding];
-        NSRegularExpression *ready = [NSRegularExpression regularExpressionWithPattern:@"\\AREADY ([1-9][0-9]{0,4})\\z" options:0 error:NULL];
-        NSTextCheckingResult *match = [ready firstMatchInString:line ?: @"" options:0 range:NSMakeRange(0, line.length)];
-        NSInteger port = match ? [[[line substringWithRange:[match rangeAtIndex:1]] description] integerValue] : 0;
-        if (port <= 0 || port > UINT16_MAX) {
-            [self stopExporterLocked];
-            NSError *error = MLRemoteUSBError(8, line.length > 0 ? line : @"The USB/IP exporter did not become ready");
-            self.state = MLRemoteUSBForwardingStateFailed;
-            self.error = error;
-            dispatch_async(dispatch_get_main_queue(), ^{ completion(0, error); });
-            return;
-        }
-
-        self.localPort = (uint16_t)port;
-        self.state = MLRemoteUSBForwardingStateReady;
-        uint16_t resultPort = self.localPort;
-        dispatch_async(dispatch_get_main_queue(), ^{ completion(resultPort, nil); });
-    });
-}
-
-- (NSData *)readLineFromHandle:(NSFileHandle *)handle timeout:(NSTimeInterval)timeout {
-    NSMutableData *data = [NSMutableData data];
-    NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:timeout];
-    while (data.length <= kMLRemoteUSBMaxLineBytes && [deadline timeIntervalSinceNow] > 0) {
-        NSData *chunk = [handle availableData];
-        if (chunk.length == 0) break;
-        [data appendData:chunk];
-        const uint8_t *bytes = data.bytes;
-        const uint8_t *newline = memchr(bytes, '\n', data.length);
-        if (newline != NULL) {
-            NSUInteger length = (NSUInteger)(newline - bytes);
-            return [data subdataWithRange:NSMakeRange(0, length)];
+        task.standardError = NSFileHandle.fileHandleWithNullDevice;
+        NSPipe *exited = MLRemoteUSBObserveTaskExit(task);
+        if (![task launchAndReturnError:&error]) {
+            error = error ?: MLRemoteUSBError(7, @"Unable to start the USB/IP exporter");
+        } else {
+            self.exporter = task;
+            self.exporterExited = exited;
+            self.exporterInput = input;
+            NSData *lineData = MLRemoteUSBReadOutput(output.fileHandleForReading, operation,
+                                                     kMLRemoteUSBStartupTimeout, kMLRemoteUSBMaxLineBytes, YES);
+            NSString *line = lineData ? [[NSString alloc] initWithData:lineData encoding:NSUTF8StringEncoding] : nil;
+            NSRegularExpression *ready = [NSRegularExpression regularExpressionWithPattern:@"\\AREADY ([1-9][0-9]{0,4})\\z" options:0 error:NULL];
+            NSTextCheckingResult *match = [ready firstMatchInString:line ?: @"" options:0 range:NSMakeRange(0, line.length)];
+            NSInteger port = match ? [[line substringWithRange:[match rangeAtIndex:1]] integerValue] : 0;
+            if (port <= 0 || port > UINT16_MAX || ![self isCurrentOperation:operation]) {
+                [self stopExporterLocked];
+                error = MLRemoteUSBError(8, line.length > 0 ? line : @"The USB/IP exporter did not become ready");
+            } else {
+                self.localPort = (uint16_t)port;
+            }
         }
     }
-    return data;
+    if (![self isCurrentOperation:operation]) return;
+    self.state = error ? MLRemoteUSBForwardingStateFailed : MLRemoteUSBForwardingStateReady;
+    self.error = error;
+    completion(self.localPort, error);
+}
+
+- (void)startExporterForDevice:(MLRemoteUSBDevice *)device
+                    completion:(void (^)(uint16_t, NSError *))completion {
+    [self enqueueOperation:^(MLRemoteUSBOperation *operation) {
+        [self startExporterForDevice:device operation:operation completion:^(uint16_t port, NSError *error) {
+            [self deliverForOperation:operation completion:^{ completion(port, error); }];
+        }];
+    }];
 }
 
 - (void)stopExporterLocked {
     NSTask *task = self.exporter;
+    NSPipe *exited = self.exporterExited;
+    [self.exporterInput.fileHandleForWriting closeFile];
     self.exporter = nil;
     self.exporterInput = nil;
+    self.exporterExited = nil;
     self.localPort = 0;
-    if (task == nil) return;
-    if (task.running) [task terminate];
-    [task waitUntilExit];
+    MLRemoteUSBTerminateTask(task, exited);
+}
+
+- (void)stopSessionLocked {
+    [self.tunnel stop];
+    self.tunnel = nil;
+    [self stopExporterLocked];
 }
 
 - (void)startForwardingForDevice:(MLRemoteUSBDevice *)device
@@ -328,44 +444,61 @@ static id MLRemoteUSBJSONObjectFromData(NSData *data, NSError **errorOut) {
                            token:(NSString *)token
                       serverCert:(NSData *)serverCert
                        completion:(void (^)(NSError * _Nullable))completion {
-    [self startExporterForDevice:device completion:^(uint16_t localPort, NSError * _Nullable error) {
-        if (error != nil) {
-            completion(error);
-            return;
-        }
-        dispatch_async(self.workerQueue, ^{
+    [self enqueueOperation:^(MLRemoteUSBOperation *operation) {
+        [self startExporterForDevice:device operation:operation completion:^(uint16_t localPort, NSError *error) {
+            if (error) {
+                [self deliverForOperation:operation completion:^{ completion(error); }];
+                return;
+            }
+            if (![self isCurrentOperation:operation]) return;
             MLRemoteUSBReverseTunnel *tunnel = [[MLRemoteUSBReverseTunnel alloc] init];
             self.tunnel = tunnel;
             self.state = MLRemoteUSBForwardingStateForwarding;
-            [tunnel startWithHost:host
-                             port:port
-                            token:token
-                            busID:device.busID
-                        localPort:localPort
-                      serverCert:serverCert
-                       completion:^(NSError * _Nullable tunnelError) {
-                if (tunnelError != nil) {
-                    self.error = tunnelError;
-                    self.state = MLRemoteUSBForwardingStateFailed;
-                }
-                completion(tunnelError);
+            __weak MLRemoteUSBForwardingSession *weakSelf = self;
+            __weak MLRemoteUSBReverseTunnel *weakTunnel = tunnel;
+            [tunnel startWithHost:host port:port token:token busID:device.busID
+                      localPort:localPort serverCert:serverCert completion:^(NSError *tunnelError) {
+                MLRemoteUSBForwardingSession *session = weakSelf;
+                MLRemoteUSBReverseTunnel *completedTunnel = weakTunnel;
+                if (!session || !completedTunnel) return;
+                dispatch_async(session.workerQueue, ^{
+                    if (![session isCurrentOperation:operation] || session.tunnel != completedTunnel) return;
+                    if (tunnelError) {
+                        session.error = tunnelError;
+                        session.state = MLRemoteUSBForwardingStateFailed;
+                    }
+                    [session deliverForOperation:operation completion:^{ completion(tunnelError); }];
+                });
             }];
-        });
+        }];
     }];
 }
 
 - (void)stop {
-    dispatch_sync(self.workerQueue, ^{
-        self.state = MLRemoteUSBForwardingStateStopping;
-        [self.tunnel stop];
-        self.tunnel = nil;
-        [self stopExporterLocked];
-        self.state = MLRemoteUSBForwardingStateIdle;
-    });
+    @synchronized (self) {
+        [self.operation cancel];
+        self.operation = nil;
+        dispatch_async(self.workerQueue, ^{
+            self.state = MLRemoteUSBForwardingStateStopping;
+            [self stopSessionLocked];
+            self.state = MLRemoteUSBForwardingStateIdle;
+        });
+    }
 }
 
 - (void)dealloc {
-    [self stop];
+    [_operation cancel];
+    // Do not enqueue a block retaining a deallocating self. The queue retains
+    // only the resources that still need teardown.
+    NSTask *task = _exporter;
+    NSPipe *input = _exporterInput;
+    NSPipe *exited = _exporterExited;
+    MLRemoteUSBReverseTunnel *tunnel = _tunnel;
+    dispatch_async(_workerQueue, ^{
+        [tunnel stop];
+        [input.fileHandleForWriting closeFile];
+        MLRemoteUSBTerminateTask(task, exited);
+    });
 }
 
 @end
