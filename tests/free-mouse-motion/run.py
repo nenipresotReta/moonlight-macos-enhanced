@@ -44,7 +44,12 @@ helpers += '\n' + '\n'.join(definition(internal, name) for name in [
     'static inline BOOL HIDShouldUseCoreHIDFreeMouseAbsoluteSync',
     'static inline BOOL HIDShouldUseAbsolutePointerPath',
     'static inline uint32_t HIDMouseButtonBitForButton',
+    'static inline PML_INPUT_STREAM_CONTEXT HIDInputContext',
+    'static inline bool HIDValidateInputContext',
+    'static inline void HIDDispatchInput',
 ])
+if 'static inline void HIDDispatchMouseButtonInput' in internal:
+    helpers += '\n' + definition(internal, 'static inline void HIDDispatchMouseButtonInput')
 legacy = '- (BOOL)seedFreeMouseVirtualCursorWithViewPoint:' not in pointer
 names = [
     '- (void)setFreeMouseVirtualCursorActive:',
@@ -60,6 +65,8 @@ names = [
     '- (void)sendAbsoluteMousePositionForViewPoint:',
     '- (void)sendMouseButton:',
     '- (void)mouseDown:',
+    '- (BOOL)hasPressedMouseButtons',
+    '- (void)releaseAllPressedMouseButtons',
     '- (void)mouseUp:',
     '- (void)mouseMoved:',
 ]
@@ -84,15 +91,19 @@ if '- (void)scheduleCoreHIDFreeMouseAbsoluteSync' in base:
 else:
     helpers += '\nstatic void HIDInvalidateCoreHIDFreeMouseAbsoluteSync(HIDSupport *s) {}\n'
     methods += '\n' + definition(base, '- (void)refreshMouseInputConfiguration')
-methods += '\n' + definition(base, '- (void)recordAbsoluteInputDiagnosticsFrom:')
+methods += '\n' + '\n'.join(definition(base, name) for name in [
+    '- (void)recordAbsoluteInputDiagnosticsFrom:', '- (BOOL)shouldSendInputEvents',
+    '- (void)setShouldSendInputEvents:', '- (void)setInputContext:',
+])
 # Compile the actual property declarations; a misspelled fixture property must fail.
 properties = '\n'.join(line for line in internal.splitlines() if line.startswith('@property') and any(
     name in line for name in [
         'freeMouseVirtualCursor', 'AbsolutePointer', 'inputDiagnostics', 'inputQueue',
-        'precisionTouchpad', 'pressedMouseButtonsMask', 'useGCMouse', 'useCoreHIDMouse',
+        'precisionTouchpad', 'pressedMouseButtonsMask', 'mouseButtonInputGeneration', 'mouseButtonContextGeneration', 'useGCMouse', 'useCoreHIDMouse',
         'coreHIDMouseRuntimeFailed', 'coreHIDFreeMouseAbsoluteSync',
     ]))
 fixture = (Path(__file__).parent / 'fixture.m').read_text()
+fixture = fixture.replace('/* MENU GESTURE */', source('Limelight/Input/ControllerMenuGesture.h').replace('#pragma once', ''))
 program = fixture.replace('/* PROPERTIES */', properties).replace('/* HELPERS */', helpers).replace('/* METHODS */', methods)
 if __name__ == '__main__':
     with tempfile.TemporaryDirectory(prefix='moonlight-free-mouse-') as tmp:

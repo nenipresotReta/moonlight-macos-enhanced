@@ -10,12 +10,15 @@ SANITIZE=1 python3 tests/free-mouse-motion/run.py
 The harness extracts production methods, coordinate conversion helpers and
 property declarations. It replaces the network input context with a packet
 collector; it does not move the local cursor, send PC input or change preferences.
-No Xcode test target or third-party dependencies are required.
+The input context getter/setter, capture setter and dispatch helpers are production
+code too; the fixture binds its isolated context instead of bypassing identity
+checks. No Xcode test target or third-party dependencies are required.
 
 Coverage includes delayed AppKit observations during raw movement and dragging,
 fixed sensitivity, geometry changes, recapture, explicit handoff, Y inversion,
 bounds, invalid reports, absolute queue ordering, duplicate positions, both
 synced and unsynced buttons, button swapping, touchpad suppression, input gates,
+synthetic-release batch boundaries, same-position recapture after a cancelled click,
 Desktop Sync, locked mouse, GameController and CoreHID runtime fallback.
 A concurrent replay checks that 1,000 positive raw reports retain every delta and
 never emit a position behind a previously emitted position.

@@ -133,6 +133,9 @@
 @property (nonatomic, strong) HIDAbsolutePointerBatch *pendingAbsolutePointerBatch;
 @property (nonatomic, strong) HIDAbsolutePointerBatch *lastSubmittedAbsolutePointerBatch;
 @property (nonatomic) uint32_t pressedMouseButtonsMask;
+// Protected by @synchronized(self), together with button submission and inputContext.
+@property (nonatomic) uint64_t mouseButtonInputGeneration;
+@property (nonatomic) uint64_t mouseButtonContextGeneration;
 @property (nonatomic) CGFloat accumulatedHighResScrollDeltaX;
 @property (nonatomic) CGFloat accumulatedHighResScrollDeltaY;
 @property (nonatomic) CGFloat accumulatedQuantizedWheelDeltaX;
@@ -383,6 +386,37 @@ static inline void HIDDispatchInput(HIDSupport *support, PML_INPUT_STREAM_CONTEX
         }
         block();
     });
+}
+
+// Mouse releases must share inputQueue with presses, but must remain deliverable
+// after capture is disabled. An epoch prevents a queued press from surviving an
+// uncapture/recapture cycle; context identity is checked before dereferencing it.
+static inline void HIDDispatchMouseButtonInput(HIDSupport *support,
+                                                PML_INPUT_STREAM_CONTEXT inputCtx,
+                                                BOOL pressed,
+                                                dispatch_block_t block) {
+    if (inputCtx == NULL) {
+        return;
+    }
+    @synchronized (support) {
+        uint64_t generation = support.mouseButtonInputGeneration;
+        uint64_t contextGeneration = support.mouseButtonContextGeneration;
+        dispatch_async(support.inputQueue, ^{
+            @synchronized (support) {
+                if (support.inputContext != inputCtx ||
+                    support.mouseButtonContextGeneration != contextGeneration ||
+                    (pressed && (!support.shouldSendInputEvents ||
+                                 support.mouseButtonInputGeneration != generation)) ||
+                    !HIDValidateInputContext(inputCtx, "queued-mouse-button")) {
+                    return;
+                }
+                if (inputCtx->connectionContext != NULL) {
+                    LiSetThreadConnectionContext(inputCtx->connectionContext);
+                }
+                block();
+            }
+        });
+    }
 }
 
 static inline CGFloat HIDPointerSensitivityForHost(TemporaryHost *host) {

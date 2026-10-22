@@ -11,12 +11,16 @@
 #define BUTTON_ACTION_RELEASE 2
 #define LOG_D 0
 #define Log(...) ((void)0)
+/* MENU GESTURE */
 typedef struct { void *connectionContext; } InputContext;
 typedef InputContext *PML_INPUT_STREAM_CONTEXT;
 typedef void *PML_CONNECTION_CONTEXT;
 static void LiSetThreadConnectionContext(void *ctx) {}
 static InputContext context;
 static BOOL validContext = YES, hybrid = YES, swapButtons;
+static bool LiInputContextIsInitialized(InputContext *ctx) { return validContext; }
+static void *LiInputContextGetConnectionCtx(InputContext *ctx) { return ctx->connectionContext; }
+static void LiSendMultiControllerEventCtx(InputContext *ctx, int p, int m, int b, int l, int r, int x, int y, int z, int w) {}
 static NSString *mouseMode = @"remote";
 static NSInteger touchMode;
 static CGFloat sensitivity = 1.0;
@@ -34,12 +38,20 @@ static void LiSendMouseButtonEventCtx(InputContext *ctx, int action, int button)
 @end
 @implementation Host
 @end
+@interface Controller : NSObject
+@property int playerIndex;
+@property ControllerMenuGesture menuGesture;
+@end
+@implementation Controller
+@end
 @interface Touchpad : NSObject
 @property BOOL suppressed, consumed;
 - (BOOL)shouldSuppressPointerMotion;
+- (void)reset;
 - (BOOL)consumeMouseButton:(int)button pressed:(BOOL)pressed;
 @end
 @implementation Touchpad
+- (void)reset {}
 - (BOOL)shouldSuppressPointerMotion { return self.suppressed; }
 - (BOOL)consumeMouseButton:(int)button pressed:(BOOL)pressed { return self.consumed; }
 @end
@@ -52,11 +64,18 @@ typedef void (^HIDFreeMouseAbsoluteSyncHandler)(void);
 + (NSArray *)mice { return @[]; }
 @end
 @class HIDAbsolutePointerBatch;
-@interface HIDSupport : NSObject
+@interface HIDSupport : NSObject {
+    BOOL _shouldSendInputEvents;
+    void *_inputContext;
+}
 /* PROPERTIES */
 @property Host *host;
 @property BOOL shouldSendInputEvents;
-@property void *inputContext;
+@property(nonatomic) void *inputContext;
+@property Controller *controller;
+@property NSInteger controllerDriver;
+@property BOOL gamepadMenuPressed;
+- (void)releaseAllPressedMouseButtons;
 @property NSObject *coreHIDMouseDriver;
 @property int relativeCalls;
 @property (copy) HIDFreeMouseAbsoluteSyncHandler freeMouseAbsoluteSyncHandler;
@@ -82,21 +101,22 @@ typedef void (^HIDFreeMouseAbsoluteSyncHandler)(void);
 @interface NSObject (TestDriver)
 @property (readonly) double secondsSinceLastMovementEvent;
 @end
-static InputContext *HIDInputContext(HIDSupport *s) { return &context; }
-static BOOL HIDValidateInputContext(InputContext *ctx, const char *reason) { return validContext; }
 static CGFloat HIDPointerSensitivityForHost(Host *h) { return sensitivity; }
-static void HIDDispatchInput(HIDSupport *s, InputContext *ctx, dispatch_block_t block) { dispatch_async(s.inputQueue, block); }
 static BOOL HIDAbsoluteMousePayloadForEvent(NSEvent *e, BOOL c, short *x, short *y, short *w, short *h) {
     *x = 800; *y = 6400; *w = 16000; *h = 9600; return YES;
 }
 /* HELPERS */
 @implementation HIDSupport
+@synthesize inputContext = _inputContext;
+- (void)releaseAllModifierKeys {}
+- (void)sendControllerEvent {}
+- (void)rumbleLowFreqMotor:(int)low highFreqMotor:(int)high {}
+- (void)syncScrollTraceDiagnosticsPreferenceToInputContext {}
 - (void)registerMouseCallbacks:(GCMouse *)mouse {}
 - (void)unregisterMouseCallbacks:(GCMouse *)mouse {}
 - (void)tearDownCoreHIDMouseDriver {}
 - (void)setupCoreHIDMouseDriverIfNeeded {}
 - (BOOL)reserveDetailedInputDiagnosticsLogSequence:(NSUInteger *)sequence { return NO; }
-- (BOOL)hasPressedMouseButtons { return self.pressedMouseButtonsMask != 0; }
 - (void)recordMouseButtonDiagnosticsAction:(NSString *)a button:(int)b mask:(uint32_t)m synthetic:(BOOL)s {}
 - (void)dispatchRelativeMouseDeltaX:(CGFloat)x deltaY:(CGFloat)y sourceTag:(NSString *)s { self.relativeCalls++; }
 /* METHODS */
@@ -107,6 +127,9 @@ static HIDSupport *support(void) {
     s.inputQueue = dispatch_queue_create("test.pointer", DISPATCH_QUEUE_SERIAL);
     s.freeMouseVirtualCursorLock = [NSObject new];
     s.inputDiagnosticsLock = [NSObject new];
+    s.controller = [Controller new];
+    s.controllerDriver = 1;
+    s.inputContext = &context;
     s.shouldSendInputEvents = YES;
     s.useCoreHIDMouse = YES;
     s.precisionTouchpad = [Touchpad new];
@@ -230,6 +253,26 @@ static void queueTests(void) {
     drain(s); expect(@[]); validContext = YES;
     s.precisionTouchpad.consumed = YES; button(s, BUTTON_LEFT, YES, 180); drain(s); expect(@[]);
     puts("PASS: input disable, touchpad suppression, invalid context and consumed buttons");
+
+    HIDSupport *released = support();
+    [released setFreeMouseVirtualCursorActive:NO];
+    gate = pauseQueue(released);
+    coalesced(released, 100);
+    [released mouseDown:nil withButton:BUTTON_LEFT];
+    coalesced(released, 110);
+    [released releaseAllPressedMouseButtons];
+    coalesced(released, 120);
+    resumeQueue(released, gate);
+    expect(@[@800, @880, @"2:1", @960]);
+    gate = pauseQueue(released);
+    button(released, BUTTON_LEFT, YES, 150);
+    released.shouldSendInputEvents = NO;
+    released.shouldSendInputEvents = YES;
+    button(released, BUTTON_LEFT, YES, 150);
+    button(released, BUTTON_LEFT, NO, 150);
+    resumeQueue(released, gate);
+    expect(@[@"2:1", @1200, @"1:1", @"2:1"]);
+    puts("PASS: synthetic release seals motion batches and recapture resends a cancelled click position");
 }
 static void isolationTests(void) {
     HIDSupport *s = support();
