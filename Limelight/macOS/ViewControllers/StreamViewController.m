@@ -294,8 +294,10 @@ static BOOL MLClipboardAgentDecodeFrame(const uint8_t *bytes,
 }
 
 - (void)connectionStarted {
+    // Capture the callback's connection while its thread-local context is still set.
+    Connection *connection = [Connection currentConnection];
     [self forwardIfCurrentNamed:@"connectionStarted" block:^(id<MLStreamScopedCallbackOwner> owner) {
-        [owner connectionStarted];
+        [owner connectionStartedForGeneration:self->_generation connection:connection];
     }];
 }
 
@@ -312,8 +314,9 @@ static BOOL MLClipboardAgentDecodeFrame(const uint8_t *bytes,
 }
 
 - (void)stageComplete:(const char *)stageName {
+    Connection *connection = [Connection currentConnection];
     [self forwardIfCurrentNamed:@"stageComplete" block:^(id<MLStreamScopedCallbackOwner> owner) {
-        [owner stageComplete:stageName];
+        [owner stageComplete:stageName forGeneration:self->_generation connection:connection];
     }];
 }
 
@@ -1831,6 +1834,10 @@ highFreqMotor:(unsigned short)highFreqMotor {
 }
 
 - (void)stageComplete:(const char *)stageName {
+    [self stageComplete:stageName forGeneration:self.activeStreamGeneration connection:[Connection currentConnection]];
+}
+
+- (void)stageComplete:(const char *)stageName forGeneration:(NSUInteger)generation connection:(Connection *)connection {
     if (stageName == NULL) {
         return;
     }
@@ -1838,7 +1845,10 @@ highFreqMotor:(unsigned short)highFreqMotor {
     // Ensure input context is bound as soon as input stream establishment completes.
     if (strcmp(stageName, "input stream establishment") == 0) {
         dispatch_async(dispatch_get_main_queue(), ^{
-            void *inputContext = self.streamMan.connection ? [self.streamMan.connection inputStreamContext] : NULL;
+            if (![self isCurrentStartupConnection:connection generation:generation]) {
+                return;
+            }
+            void *inputContext = [connection inputStreamContext];
             if (inputContext == NULL) {
                 Log(LOG_W, @"Input stream established but inputContext is NULL");
                 return;
@@ -1906,8 +1916,8 @@ highFreqMotor:(unsigned short)highFreqMotor {
 
 // The renderer reports its first rendered frame the moment it happens, so the indicator does
 // not have to wait for the next tick of the startup poll below (which stays as the fallback).
-- (void)handleFirstFramePresentedForGeneration:(NSUInteger)generation {
-    if (!self.waitingForFirstRenderedFrame || self.activeStreamGeneration != generation) {
+- (void)handleFirstFramePresentedForGeneration:(NSUInteger)generation connection:(Connection *)connection {
+    if (!self.waitingForFirstRenderedFrame || ![self isCurrentStartupConnection:connection generation:generation]) {
         return;
     }
 
@@ -1916,8 +1926,8 @@ highFreqMotor:(unsigned short)highFreqMotor {
     }
 }
 
-- (void)scheduleInitialRenderedFrameCheckForGeneration:(NSUInteger)generation remainingAttempts:(NSUInteger)remainingAttempts {
-    if (!self.waitingForFirstRenderedFrame || self.activeStreamGeneration != generation) {
+- (void)scheduleInitialRenderedFrameCheckForGeneration:(NSUInteger)generation connection:(Connection *)connection remainingAttempts:(NSUInteger)remainingAttempts {
+    if (!self.waitingForFirstRenderedFrame || ![self isCurrentStartupConnection:connection generation:generation]) {
         return;
     }
 
@@ -1940,7 +1950,7 @@ highFreqMotor:(unsigned short)highFreqMotor {
             return;
         }
 
-        [strongSelf scheduleInitialRenderedFrameCheckForGeneration:generation remainingAttempts:remainingAttempts - 1];
+        [strongSelf scheduleInitialRenderedFrameCheckForGeneration:generation connection:connection remainingAttempts:remainingAttempts - 1];
     });
 }
 
@@ -1979,13 +1989,52 @@ highFreqMotor:(unsigned short)highFreqMotor {
         (long)screenMode);
 }
 
+- (BOOL)isCurrentStartupConnection:(Connection *)connection generation:(NSUInteger)generation {
+    return connection != nil && !connection.hasTerminated &&
+        !self.stopStreamInProgress && [self isActiveStreamGeneration:generation] &&
+        self.streamMan.connection == connection;
+}
+
+- (void)retryInputBindingForConnection:(Connection *)connection
+                          generation:(NSUInteger)generation
+                   remainingAttempts:(NSUInteger)remainingAttempts {
+    // Look up the context only after checking the original connection. A queued retry
+    // must never dereference a retired context or bind it to replacement input objects.
+    if (![self isCurrentStartupConnection:connection generation:generation]) {
+        return;
+    }
+    void *inputContext = [connection inputStreamContext];
+    if (inputContext != NULL && LiInputContextIsInitialized((PML_INPUT_STREAM_CONTEXT)inputContext)) {
+        self.hidSupport.inputContext = inputContext;
+        self.controllerSupport.inputContext = inputContext;
+        [self rearmMouseCaptureIfPossibleWithReason:@"input-context-retry-bound"];
+        return;
+    }
+    if (remainingAttempts == 0) {
+        Log(LOG_W, @"Input context still not initialized after retries");
+        return;
+    }
+    __weak typeof(self) weakSelf = self;
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.05 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        [weakSelf retryInputBindingForConnection:connection generation:generation remainingAttempts:remainingAttempts - 1];
+    });
+}
+
 - (void)connectionStarted {
+    // Compatibility for direct ConnectionCallbacks callers. The stream manager uses
+    // the scoped entry point below, retaining the generation from callback creation.
+    [self connectionStartedForGeneration:self.activeStreamGeneration connection:[Connection currentConnection]];
+}
+
+- (void)connectionStartedForGeneration:(NSUInteger)generation connection:(Connection *)callbackConn {
     Log(LOG_I, @"[diag] StreamViewController connectionStarted received: main=%d activeGen=%lu",
         [NSThread isMainThread] ? 1 : 0,
         (unsigned long)self.activeStreamGeneration);
-    Connection *callbackConn = [Connection currentConnection];
-    void *callbackInputContext = callbackConn ? [callbackConn inputStreamContext] : NULL;
     dispatch_async(dispatch_get_main_queue(), ^{
+        if (![self isCurrentStartupConnection:callbackConn generation:generation]) {
+            return;
+        }
+        void *callbackInputContext = [callbackConn inputStreamContext];
         Log(LOG_I, @"[diag] StreamViewController connectionStarted main block begin: window=%p callbackConn=%p callbackInput=%p streamConn=%p",
             self.view.window,
             callbackConn,
@@ -1995,7 +2044,9 @@ highFreqMotor:(unsigned short)highFreqMotor {
             NSString *audioPlanNotice = self.pendingAudioPlanNotice;
             self.pendingAudioPlanNotice = nil;
             dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-                [self audioCodecNotice:audioPlanNotice];
+                if ([self isCurrentStartupConnection:callbackConn generation:generation]) {
+                    [self showNotification:audioPlanNotice forSeconds:8.0];
+                }
             });
         }
         @try {
@@ -2006,16 +2057,13 @@ highFreqMotor:(unsigned short)highFreqMotor {
                                                                                                 windowController:self.view.window.windowController];
 
                 [self resetClipboardActivationDiagnosticState];
-                self.clipboardRuntimeConnection = callbackConn ?: self.streamMan.connection;
+                self.clipboardRuntimeConnection = callbackConn;
                 Log(LOG_I, @"[clipboard] Runtime clipboard connection selected: callback=%p stream=%p active=%p",
                     callbackConn,
                     self.streamMan.connection,
                     self.clipboardRuntimeConnection);
 
                 void *inputContext = callbackInputContext;
-                if (!inputContext && self.streamMan.connection) {
-                    inputContext = [self.streamMan.connection inputStreamContext];
-                }
                 if (inputContext) {
                     PML_INPUT_STREAM_CONTEXT ctx = (PML_INPUT_STREAM_CONTEXT)inputContext;
                     Log(LOG_I, @"Input ABI: size=%u off_init=%u off_conn=%u", LiGetInputContextStructSize(), LiGetInputContextOffsetInitialized(), LiGetInputContextOffsetConnectionContext());
@@ -2026,35 +2074,7 @@ highFreqMotor:(unsigned short)highFreqMotor {
                     self.hidSupport.shouldSendInputEvents = YES;
                     self.controllerSupport.shouldSendInputEvents = YES;
 
-                    // If input stream isn't initialized yet, retry briefly to bind after start
-                    __block int remainingAttempts = 20;
-                    __weak typeof(self) weakSelf = self;
-                    __block void (^retryBind)(void) = nil;
-                    __weak void (^weakRetryBind)(void) = nil;
-                    retryBind = ^{
-                        __strong typeof(weakSelf) strongSelf = weakSelf;
-                        if (!strongSelf) {
-                            return;
-                        }
-                        PML_INPUT_STREAM_CONTEXT ctx = (PML_INPUT_STREAM_CONTEXT)inputContext;
-                        if (ctx != NULL && LiInputContextIsInitialized(ctx)) {
-                            strongSelf.hidSupport.inputContext = inputContext;
-                            strongSelf.controllerSupport.inputContext = inputContext;
-                            [strongSelf rearmMouseCaptureIfPossibleWithReason:@"input-context-retry-bound"];
-                            return;
-                        }
-                        if (remainingAttempts-- <= 0) {
-                            Log(LOG_W, @"Input context still not initialized after retries");
-                            return;
-                        }
-                        void (^strongRetryBind)(void) = weakRetryBind;
-                        if (!strongRetryBind) {
-                            return;
-                        }
-                        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.05 * NSEC_PER_SEC)), dispatch_get_main_queue(), strongRetryBind);
-                    };
-                    weakRetryBind = retryBind;
-                    retryBind();
+                    [self retryInputBindingForConnection:callbackConn generation:generation remainingAttempts:20];
                 }
 
         self.waitingForFirstRenderedFrame = YES;
@@ -2064,17 +2084,17 @@ highFreqMotor:(unsigned short)highFreqMotor {
         [self startRemoteDisplayScaleForCurrentSession];
         self.streamHealthConnectionStartedMs = [self nowMs];
         [self refreshInputDiagnosticsPreference];
-        NSUInteger startupGeneration = self.activeStreamGeneration;
         __weak typeof(self) weakStartupSelf = self;
-        self.streamMan.connection.renderer.firstFramePresentedHandler = ^{
+        __weak Connection *weakStartupConnection = callbackConn;
+        callbackConn.renderer.firstFramePresentedHandler = ^{
             // Called on the thread that counted the frame; the indicator is main-thread state.
             dispatch_async(dispatch_get_main_queue(), ^{
-                [weakStartupSelf handleFirstFramePresentedForGeneration:startupGeneration];
+                [weakStartupSelf handleFirstFramePresentedForGeneration:generation connection:weakStartupConnection];
             });
         };
         // Checks right away, so a frame presented before the handler was set is not missed,
         // then keeps polling as the fallback.
-        [self scheduleInitialRenderedFrameCheckForGeneration:startupGeneration remainingAttempts:80];
+        [self scheduleInitialRenderedFrameCheckForGeneration:generation connection:callbackConn remainingAttempts:80];
 
         Log(LOG_I, @"connectionStarted (t=%.0fms) window style=%llu level=%ld", CACurrentMediaTime() * 1000.0, (unsigned long long)self.view.window.styleMask, (long)self.view.window.level);
 
@@ -2124,10 +2144,9 @@ highFreqMotor:(unsigned short)highFreqMotor {
         [self captureMouse];
         [self logCurrentWindowStateWithContext:@"connection-started-after-capture"];
         [self claimClipboardSyncOwnershipIfNeeded];
-        NSUInteger clipboardRetryGeneration = self.activeStreamGeneration;
         for (NSNumber *delay in @[@0.15, @0.50, @1.00, @2.00, @4.00, @8.00, @12.00]) {
             dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(delay.doubleValue * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-                if (self.activeStreamGeneration != clipboardRetryGeneration) {
+                if (![self isCurrentStartupConnection:callbackConn generation:generation]) {
                     return;
                 }
                 if (![self isClipboardSyncOwner] || self.clipboardSessionBound) {
@@ -2150,17 +2169,22 @@ highFreqMotor:(unsigned short)highFreqMotor {
             Log(LOG_I, @"[diag] Startup display mode already primed; skipping duplicate apply");
         } else {
             dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(startupDisplayDelay * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-                [self applyStartupDisplayMode:startupDisplayMode];
+                if ([self isCurrentStartupConnection:callbackConn generation:generation]) {
+                    [self applyStartupDisplayMode:startupDisplayMode];
+                }
             });
         }
 
         // Re-assert capture shortly after mode switches in case AppKit temporarily steals focus.
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)((startupDisplayDelay + 0.35) * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-            if (!self.isMouseCaptured) {
+            if ([self isCurrentStartupConnection:callbackConn generation:generation] && !self.isMouseCaptured) {
                 [self captureMouse];
             }
         });
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            if (![self isCurrentStartupConnection:callbackConn generation:generation]) {
+                return;
+            }
             VideoStats stats = (VideoStats){0};
             if (self.streamMan.connection && self.streamMan.connection.renderer) {
                 stats = self.streamMan.connection.renderer.videoStats;

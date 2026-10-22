@@ -106,6 +106,8 @@ BOOL MLAppleDolbyVisionDirectSurfaceAvailable(unsigned int targetDisplayID);
 + (Connection *)currentConnection;
 
 @property(nonatomic, readonly) VideoDecoderRenderer *renderer;
+// Terminal for this Connection instance; startup callbacks must not revive it.
+@property(nonatomic, readonly) BOOL hasTerminated;
 
 - (id)initWithConfig:(StreamConfiguration *)config
                renderer:(VideoDecoderRenderer *)myRenderer
