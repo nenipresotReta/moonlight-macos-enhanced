@@ -69,6 +69,7 @@ typedef void (^HIDFreeMouseAbsoluteSyncHandler)(void);
 - (BOOL)shouldUseAbsolutePointerPathForCurrentConfiguration;
 - (BOOL)shouldUseCoreHIDFreeMouseAbsoluteSyncForCurrentConfiguration;
 - (BOOL)hasRecentCoreHIDMouseMovement;
+- (BOOL)isPointerMotionSuppressed;
 
 @end
 

@@ -67,7 +67,7 @@ program += r'''
 - (BOOL)isWindowFullscreen { return self.fullscreen; }
 - (BOOL)isWindowBorderlessMode { return NO; }
 - (BOOL)shouldUseCoreHIDTightFreeMouseHandoff { return hybrid; }
-- (BOOL)shouldUseCoreHIDVirtualSemanticLocation { return self.ownsVirtual && self.isMouseCaptured && hybrid && recentRaw; }
+- (BOOL)shouldUseCoreHIDVirtualSemanticLocation { return self.ownsVirtual && self.isMouseCaptured && hybrid && recentRaw && ![self.hidSupport.precisionTouchpad shouldSuppressPointerMotion]; }
 - (NSPoint)currentMouseLocationInViewCoordinates { return self.systemPoint; }
 - (NSPoint)viewPointForMouseEvent:(NSEvent *)e { return self.systemPoint; }
 - (BOOL)supportsRemoteDesktopCursorSync { return YES; }
@@ -165,7 +165,10 @@ static void scheduledTest(void) {
     [s scheduleCoreHIDFreeMouseAbsoluteSync]; [s refreshMouseInputConfiguration]; spin(); assert(calls==1);
     [s scheduleCoreHIDFreeMouseAbsoluteSync]; s.shouldSendInputEvents=NO; spin(); assert(calls==1);
     s.shouldSendInputEvents=YES; [s scheduleCoreHIDFreeMouseAbsoluteSync]; hybrid=NO; spin(); assert(calls==1); hybrid=YES;
-    puts("PASS: native work coalesces 1000 reports and cancels on mode reset, release and fallback");
+    [s scheduleCoreHIDFreeMouseAbsoluteSync]; s.precisionTouchpad.suppressed=YES; spin(); assert(calls==1);
+    [s scheduleCoreHIDFreeMouseAbsoluteSync]; spin(); assert(calls==1);
+    s.precisionTouchpad.suppressed=NO;
+    puts("PASS: native work coalesces 1000 reports and cancels on mode reset, release, fallback and touchpad takeover");
 }
 '''
 program += '\nint main(void) { @autoreleasepool { packets=[NSMutableArray array];\n'
