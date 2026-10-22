@@ -1606,6 +1606,10 @@ static unsigned short HIDPositionalKeyCode(unsigned short macKeyCode) {
     return HIDShouldUseCoreHIDFreeMouseAbsoluteSync(self);
 }
 
+- (BOOL)isPointerMotionSuppressed {
+    return [self.precisionTouchpad shouldSuppressPointerMotion];
+}
+
 - (BOOL)hasRecentCoreHIDMouseMovement {
     return self.coreHIDMouseDriver != nil &&
            self.coreHIDMouseDriver.secondsSinceLastMovementEvent < 0.25;
@@ -1788,7 +1792,8 @@ static unsigned short HIDPositionalKeyCode(unsigned short macKeyCode) {
 - (void)scheduleCoreHIDFreeMouseAbsoluteSync {
     @synchronized (self.freeMouseVirtualCursorLock) {
         if (self.coreHIDFreeMouseAbsoluteSyncScheduled || self.freeMouseAbsoluteSyncHandler == nil ||
-            !self.shouldSendInputEvents || !HIDShouldUseCoreHIDFreeMouseAbsoluteSync(self)) {
+            !self.shouldSendInputEvents || [self isPointerMotionSuppressed] ||
+            !HIDShouldUseCoreHIDFreeMouseAbsoluteSync(self)) {
             return;
         }
         self.coreHIDFreeMouseAbsoluteSyncScheduled = YES;
@@ -1805,7 +1810,8 @@ static unsigned short HIDPositionalKeyCode(unsigned short macKeyCode) {
                     strongSelf.coreHIDFreeMouseAbsoluteSyncToken != token) return;
                 strongSelf.coreHIDFreeMouseAbsoluteSyncScheduled = NO;
             }
-            if (strongSelf.shouldSendInputEvents && HIDShouldUseCoreHIDFreeMouseAbsoluteSync(strongSelf)) {
+            if (strongSelf.shouldSendInputEvents && ![strongSelf isPointerMotionSuppressed] &&
+                HIDShouldUseCoreHIDFreeMouseAbsoluteSync(strongSelf)) {
                 handler();
             }
         });

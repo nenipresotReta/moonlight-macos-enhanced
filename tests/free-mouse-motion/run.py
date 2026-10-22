@@ -77,7 +77,7 @@ if legacy:
 - (BOOL)sendCurrentFreeMouseVirtualCursorPosition { return NO; }
 '''
 if '- (void)scheduleCoreHIDFreeMouseAbsoluteSync' in base:
-    names_extra = ['- (void)scheduleCoreHIDFreeMouseAbsoluteSync', '- (void)refreshMouseInputConfiguration']
+    names_extra = ['- (void)scheduleCoreHIDFreeMouseAbsoluteSync', '- (void)refreshMouseInputConfiguration', '- (BOOL)isPointerMotionSuppressed']
     methods += '\n' + '\n'.join(definition(base, name) for name in names_extra)
     methods += '\n' + definition(pointer, '- (BOOL)getFreeMouseVirtualCursorPoint:(NSPoint *)viewPoint\n                         referenceSize:(NSSize *)referenceSize\n                                motion:')
     helpers += '\n' + definition(internal, 'static inline void HIDInvalidateCoreHIDFreeMouseAbsoluteSync')

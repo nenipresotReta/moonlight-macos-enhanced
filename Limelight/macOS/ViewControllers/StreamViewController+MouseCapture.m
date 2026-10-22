@@ -204,6 +204,7 @@ static inline NSPoint MLClampFreeMousePointToExitEdge(NSPoint point,
            self.isMouseCaptured &&
            [self.hidSupport shouldUseCoreHIDFreeMouseAbsoluteSyncForCurrentConfiguration] &&
            [self.hidSupport hasRecentCoreHIDMouseMovement] &&
+           ![self.hidSupport isPointerMotionSuppressed] &&
            window != nil &&
            window.isKeyWindow &&
            window.isMainWindow &&
