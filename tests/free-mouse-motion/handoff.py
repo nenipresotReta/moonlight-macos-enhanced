@@ -143,7 +143,9 @@ static void handoffTest(void) {
     c.suppressFreeMouseEdgeUncaptureUntilMs=0;
     c.ownsVirtual=NO; oldWarps=warps; [c synchronizeCoreHIDFreeMousePointer]; assert(warps==oldWarps);
     c.ownsVirtual=YES; recentRaw=NO; anchor(s,500,400); c.systemPoint=NSMakePoint(100,400);
-    [c reconcileHybridFreeMouseAnchorToCurrentPointer]; drain(s); assert(s.freeMouseVirtualCursorPoint.x==100);
+    drain(s); [packets removeAllObjects];
+    [c reconcileHybridFreeMouseAnchorToCurrentPointer]; drain(s);
+    assert(s.freeMouseVirtualCursorPoint.x==500 && packets.count==0);
     [c synchronizeCoreHIDFreeMousePointer]; assert(warps==oldWarps); recentRaw=YES;
     puts("PASS: windowed/four-edge behavior, entry suppression, inactive-owner and AppKit takeover");
 
@@ -171,19 +173,20 @@ static void scheduledTest(void) {
     puts("PASS: native work coalesces 1000 reports and cancels on mode reset, release, fallback and touchpad takeover");
 }
 '''
-program += '\nint main(void) { @autoreleasepool { packets=[NSMutableArray array];\n'
-if fixture['options'].case != 'handoff':
-    program += 'modeTest();\n'
-if fixture['options'].case != 'mode':
-    program += 'handoffTest();\n'
-    if new:
-        program += 'scheduledTest();\n'
-program += '} }\n'
-with tempfile.TemporaryDirectory(prefix='moonlight-handoff-') as tmp:
-    p=Path(tmp); (p/'test.m').write_text(program)
-    args = ['clang', '-fobjc-arc', '-fblocks', '-Wall', '-Wextra', '-Werror',
-            '-Wno-unused-parameter', '-Wno-unused-function', '-framework', 'AppKit']
-    if os.environ.get('SANITIZE'):
-        args += ['-fsanitize=address,undefined', '-fno-omit-frame-pointer']
-    subprocess.run(args + [str(p/'test.m'), '-o', str(p/'test')], check=True)
-    subprocess.run([str(p/'test')],check=True)
+if __name__ == '__main__':
+    program += '\nint main(void) { @autoreleasepool { packets=[NSMutableArray array];\n'
+    if fixture['options'].case != 'handoff':
+        program += 'modeTest();\n'
+    if fixture['options'].case != 'mode':
+        program += 'handoffTest();\n'
+        if new:
+            program += 'scheduledTest();\n'
+    program += '} }\n'
+    with tempfile.TemporaryDirectory(prefix='moonlight-handoff-') as tmp:
+        p=Path(tmp); (p/'test.m').write_text(program)
+        args = ['clang', '-fobjc-arc', '-fblocks', '-Wall', '-Wextra', '-Werror',
+                '-Wno-unused-parameter', '-Wno-unused-function', '-framework', 'AppKit']
+        if os.environ.get('SANITIZE'):
+            args += ['-fsanitize=address,undefined', '-fno-omit-frame-pointer']
+        subprocess.run(args + [str(p/'test.m'), '-o', str(p/'test')], check=True)
+        subprocess.run([str(p/'test')],check=True)
