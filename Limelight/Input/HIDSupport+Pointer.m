@@ -470,24 +470,29 @@ static inline double HIDBlendFreeMouseGain(double currentGain, double rawDelta, 
             }
         };
         
-        mouse.mouseInput.auxiliaryButtons[0].pressedChangedHandler = ^(GCControllerButtonInput * _Nonnull button, float value, BOOL pressed) {
-            if (self.shouldSendInputEvents) {
-                PML_INPUT_STREAM_CONTEXT inputCtx = HIDInputContext(self);
-                if (!inputCtx) {
-                    return;
+        NSArray<GCControllerButtonInput *> *auxiliaryButtons = mouse.mouseInput.auxiliaryButtons;
+        if (auxiliaryButtons.count > 0) {
+            auxiliaryButtons[0].pressedChangedHandler = ^(GCControllerButtonInput * _Nonnull button, float value, BOOL pressed) {
+                if (self.shouldSendInputEvents) {
+                    PML_INPUT_STREAM_CONTEXT inputCtx = HIDInputContext(self);
+                    if (!inputCtx) {
+                        return;
+                    }
+                    LiSendMouseButtonEventCtx(inputCtx, pressed ? BUTTON_ACTION_PRESS : BUTTON_ACTION_RELEASE, BUTTON_X1);
                 }
-                LiSendMouseButtonEventCtx(inputCtx, pressed ? BUTTON_ACTION_PRESS : BUTTON_ACTION_RELEASE, BUTTON_X1);
-            }
-        };
-        mouse.mouseInput.auxiliaryButtons[1].pressedChangedHandler = ^(GCControllerButtonInput * _Nonnull button, float value, BOOL pressed) {
-            if (self.shouldSendInputEvents) {
-                PML_INPUT_STREAM_CONTEXT inputCtx = HIDInputContext(self);
-                if (!inputCtx) {
-                    return;
+            };
+        }
+        if (auxiliaryButtons.count > 1) {
+            auxiliaryButtons[1].pressedChangedHandler = ^(GCControllerButtonInput * _Nonnull button, float value, BOOL pressed) {
+                if (self.shouldSendInputEvents) {
+                    PML_INPUT_STREAM_CONTEXT inputCtx = HIDInputContext(self);
+                    if (!inputCtx) {
+                        return;
+                    }
+                    LiSendMouseButtonEventCtx(inputCtx, pressed ? BUTTON_ACTION_PRESS : BUTTON_ACTION_RELEASE, BUTTON_X2);
                 }
-                LiSendMouseButtonEventCtx(inputCtx, pressed ? BUTTON_ACTION_PRESS : BUTTON_ACTION_RELEASE, BUTTON_X2);
-            }
-        };
+            };
+        }
     } else {
         mouse.mouseInput.mouseMovedHandler = nil;
         mouse.mouseInput.leftButton.pressedChangedHandler = nil;
