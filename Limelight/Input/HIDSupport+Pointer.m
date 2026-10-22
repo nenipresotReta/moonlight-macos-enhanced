@@ -435,7 +435,7 @@ static inline double HIDBlendFreeMouseGain(double currentGain, double rawDelta, 
             self.mouseDeltaX += deltaX;
             self.mouseDeltaY -= deltaY;
         };
-        
+
         mouse.mouseInput.leftButton.pressedChangedHandler = ^(GCControllerButtonInput * _Nonnull button, float value, BOOL pressed) {
             if ([self.precisionTouchpad consumeMouseButton:BUTTON_LEFT pressed:pressed]) {
                 return;
@@ -469,7 +469,7 @@ static inline double HIDBlendFreeMouseGain(double currentGain, double rawDelta, 
                 LiSendMouseButtonEventCtx(inputCtx, pressed ? BUTTON_ACTION_PRESS : BUTTON_ACTION_RELEASE, BUTTON_RIGHT);
             }
         };
-        
+
         mouse.mouseInput.auxiliaryButtons[0].pressedChangedHandler = ^(GCControllerButtonInput * _Nonnull button, float value, BOOL pressed) {
             if (self.shouldSendInputEvents) {
                 PML_INPUT_STREAM_CONTEXT inputCtx = HIDInputContext(self);
@@ -596,7 +596,7 @@ static CVReturn displayLinkOutputCallback(CVDisplayLinkRef displayLink,
         short ry = me.controller.lastRightStickY;
         short deadzone = 4000;
         float sensitivity = 15.0f; // Approx match to Qt/ControllerSupport
-        
+
         if (abs(rx) > deadzone || abs(ry) > deadzone) {
             float dx = (float)(abs(rx) > deadzone ? rx : 0) / 32767.0f * sensitivity;
             float dy = (float)(abs(ry) > deadzone ? ry : 0) / 32767.0f * sensitivity;
@@ -670,109 +670,126 @@ static CVReturn displayLinkOutputCallback(CVDisplayLinkRef displayLink,
 
 
 - (BOOL)hasPressedMouseButtons {
-    return self.pressedMouseButtonsMask != 0;
+    @synchronized (self) {
+        return self.pressedMouseButtonsMask != 0;
+    }
 }
 
 - (void)releaseAllPressedMouseButtons {
-    uint32_t pressedMask = self.pressedMouseButtonsMask;
-    if (pressedMask == 0) {
-        return;
-    }
+    @synchronized (self) {
+        self.mouseButtonInputGeneration += 1;
+        // A cancelled synchronized press may have recorded a position before
+        // delivery. Do not deduplicate the next capture against that position.
+        @synchronized (self.inputDiagnosticsLock) {
+            self.lastAbsolutePointerReferenceWidth = 0;
+            self.lastAbsolutePointerReferenceHeight = 0;
+        }
+        uint32_t pressedMask = self.pressedMouseButtonsMask;
+        if (pressedMask == 0) {
+            return;
+        }
 
-    self.pressedMouseButtonsMask = 0;
+        self.pressedMouseButtonsMask = 0;
 
-    PML_INPUT_STREAM_CONTEXT inputCtx = HIDInputContext(self);
-    if (self.shouldSendInputEvents && HIDValidateInputContext(inputCtx, "releaseAllPressedMouseButtons")) {
-        static const int buttons[] = {
-            BUTTON_LEFT,
-            BUTTON_MIDDLE,
-            BUTTON_RIGHT,
-            BUTTON_X1,
-            BUTTON_X2,
-        };
+        PML_INPUT_STREAM_CONTEXT inputCtx = HIDInputContext(self);
+        if (HIDValidateInputContext(inputCtx, "releaseAllPressedMouseButtons")) {
+            static const int buttons[] = {
+                BUTTON_LEFT,
+                BUTTON_MIDDLE,
+                BUTTON_RIGHT,
+                BUTTON_X1,
+                BUTTON_X2,
+            };
 
-        for (NSUInteger index = 0; index < sizeof(buttons) / sizeof(buttons[0]); index++) {
-            int button = buttons[index];
-            if ((pressedMask & HIDMouseButtonBitForButton(button)) == 0) {
-                continue;
+            for (NSUInteger index = 0; index < sizeof(buttons) / sizeof(buttons[0]); index++) {
+                int button = buttons[index];
+                if ((pressedMask & HIDMouseButtonBitForButton(button)) == 0) {
+                    continue;
+                }
+
+                HIDDispatchMouseButtonInput(self, inputCtx, NO, ^{
+                    LiSendMouseButtonEventCtx(inputCtx, BUTTON_ACTION_RELEASE, button);
+                });
+                [self recordMouseButtonDiagnosticsAction:@"release"
+                                                  button:button
+                                                    mask:self.pressedMouseButtonsMask
+                                               synthetic:YES];
             }
-
-            LiSendMouseButtonEventCtx(inputCtx, BUTTON_ACTION_RELEASE, button);
-            [self recordMouseButtonDiagnosticsAction:@"release"
-                                              button:button
-                                                mask:self.pressedMouseButtonsMask
-                                           synthetic:YES];
         }
     }
 }
 
 - (void)mouseDown:(NSEvent *)event withButton:(int)button {
-    if (self.useGCMouse) {
-        return;
-    }
-    
-    if ([SettingsClass swapMouseButtonsFor:self.host.uuid]) {
-        if (button == BUTTON_LEFT) {
-            button = BUTTON_RIGHT;
-        } else if (button == BUTTON_RIGHT) {
-            button = BUTTON_LEFT;
+    @synchronized (self) {
+        if (self.useGCMouse) {
+            return;
         }
-    }
-    
-    if (!self.shouldSendInputEvents) {
-        return;
-    }
 
-    if ([self.precisionTouchpad consumeMouseButton:button pressed:YES]) {
-        return;
-    }
+        if ([SettingsClass swapMouseButtonsFor:self.host.uuid]) {
+            if (button == BUTTON_LEFT) {
+                button = BUTTON_RIGHT;
+            } else if (button == BUTTON_RIGHT) {
+                button = BUTTON_LEFT;
+            }
+        }
 
-    PML_INPUT_STREAM_CONTEXT inputCtx = HIDInputContext(self);
-    if (!HIDValidateInputContext(inputCtx, "mouseDown")) {
-        return;
-    }
+        if (!self.shouldSendInputEvents) {
+            return;
+        }
 
-    self.pressedMouseButtonsMask |= HIDMouseButtonBitForButton(button);
-    [self recordMouseButtonDiagnosticsAction:@"press"
-                                      button:button
-                                        mask:self.pressedMouseButtonsMask
-                                   synthetic:NO];
-    HIDDispatchInput(self, inputCtx, ^{
-        LiSendMouseButtonEventCtx(inputCtx, BUTTON_ACTION_PRESS, button);
-    });
+        if ([self.precisionTouchpad consumeMouseButton:button pressed:YES]) {
+            return;
+        }
+
+        PML_INPUT_STREAM_CONTEXT inputCtx = HIDInputContext(self);
+        if (!HIDValidateInputContext(inputCtx, "mouseDown")) {
+            return;
+        }
+
+        self.pressedMouseButtonsMask |= HIDMouseButtonBitForButton(button);
+        [self recordMouseButtonDiagnosticsAction:@"press"
+                                          button:button
+                                            mask:self.pressedMouseButtonsMask
+                                       synthetic:NO];
+        HIDDispatchMouseButtonInput(self, inputCtx, YES, ^{
+            LiSendMouseButtonEventCtx(inputCtx, BUTTON_ACTION_PRESS, button);
+        });
+    }
 }
 
 - (void)mouseUp:(NSEvent *)event withButton:(int)button {
-    if (self.useGCMouse) {
-        return;
-    }
-    
-    if ([SettingsClass swapMouseButtonsFor:self.host.uuid]) {
-        if (button == BUTTON_LEFT) {
-            button = BUTTON_RIGHT;
-        } else if (button == BUTTON_RIGHT) {
-            button = BUTTON_LEFT;
+    @synchronized (self) {
+        if (self.useGCMouse) {
+            return;
         }
-    }
-    
-    if ([self.precisionTouchpad consumeMouseButton:button pressed:NO]) {
-        return;
-    }
 
-    if (self.shouldSendInputEvents) {
-        PML_INPUT_STREAM_CONTEXT inputCtx = HIDInputContext(self);
-        if (HIDValidateInputContext(inputCtx, "mouseUp")) {
-            HIDDispatchInput(self, inputCtx, ^{
-                LiSendMouseButtonEventCtx(inputCtx, BUTTON_ACTION_RELEASE, button);
-            });
+        if ([SettingsClass swapMouseButtonsFor:self.host.uuid]) {
+            if (button == BUTTON_LEFT) {
+                button = BUTTON_RIGHT;
+            } else if (button == BUTTON_RIGHT) {
+                button = BUTTON_LEFT;
+            }
         }
-    }
 
-    self.pressedMouseButtonsMask &= ~HIDMouseButtonBitForButton(button);
-    [self recordMouseButtonDiagnosticsAction:@"release"
-                                      button:button
-                                        mask:self.pressedMouseButtonsMask
-                                   synthetic:NO];
+        if ([self.precisionTouchpad consumeMouseButton:button pressed:NO]) {
+            return;
+        }
+
+        if (self.shouldSendInputEvents) {
+            PML_INPUT_STREAM_CONTEXT inputCtx = HIDInputContext(self);
+            if (HIDValidateInputContext(inputCtx, "mouseUp")) {
+                HIDDispatchMouseButtonInput(self, inputCtx, NO, ^{
+                    LiSendMouseButtonEventCtx(inputCtx, BUTTON_ACTION_RELEASE, button);
+                });
+            }
+        }
+
+        self.pressedMouseButtonsMask &= ~HIDMouseButtonBitForButton(button);
+        [self recordMouseButtonDiagnosticsAction:@"release"
+                                          button:button
+                                            mask:self.pressedMouseButtonsMask
+                                       synthetic:NO];
+    }
 }
 
 - (void)mouseMoved:(NSEvent *)event {
@@ -888,86 +905,88 @@ static CVReturn displayLinkOutputCallback(CVDisplayLinkRef displayLink,
       syncedToViewPoint:(NSPoint)viewPoint
           referenceSize:(NSSize)referenceSize
           clampToBounds:(BOOL)clampToBounds {
-    if (self.useGCMouse) {
-        return;
-    }
-
-    if ([SettingsClass swapMouseButtonsFor:self.host.uuid]) {
-        if (button == BUTTON_LEFT) {
-            button = BUTTON_RIGHT;
-        } else if (button == BUTTON_RIGHT) {
-            button = BUTTON_LEFT;
+    @synchronized (self) {
+        if (self.useGCMouse) {
+            return;
         }
-    }
 
-    if (!self.shouldSendInputEvents) {
-        return;
-    }
-
-    if ([self.precisionTouchpad consumeMouseButton:button pressed:pressed]) {
-        return;
-    }
-
-    PML_INPUT_STREAM_CONTEXT inputCtx = HIDInputContext(self);
-    if (!HIDValidateInputContext(inputCtx, pressed ? "sendMouseButtonPressSynced" : "sendMouseButtonReleaseSynced")) {
-        return;
-    }
-
-    short hostX = 0;
-    short hostY = 0;
-    short referenceWidth = 0;
-    short referenceHeight = 0;
-    BOOL shouldSendAbsolute = HIDAbsoluteMousePositionForViewPoint(viewPoint,
-                                                                   referenceSize,
-                                                                   clampToBounds,
-                                                                   &hostX,
-                                                                   &hostY,
-                                                                   &referenceWidth,
-                                                                   &referenceHeight);
-    if (shouldSendAbsolute &&
-        hostX == self.lastAbsolutePointerHostX &&
-        hostY == self.lastAbsolutePointerHostY &&
-        referenceWidth == self.lastAbsolutePointerReferenceWidth &&
-        referenceHeight == self.lastAbsolutePointerReferenceHeight) {
-        if (self.inputDiagnosticsEnabled) {
-            @synchronized (self.inputDiagnosticsLock) {
-                self.inputDiagnosticsAbsoluteDuplicateSkips += 1;
+        if ([SettingsClass swapMouseButtonsFor:self.host.uuid]) {
+            if (button == BUTTON_LEFT) {
+                button = BUTTON_RIGHT;
+            } else if (button == BUTTON_RIGHT) {
+                button = BUTTON_LEFT;
             }
         }
-        shouldSendAbsolute = NO;
-    }
 
-    if (pressed) {
-        self.pressedMouseButtonsMask |= HIDMouseButtonBitForButton(button);
-        [self recordMouseButtonDiagnosticsAction:@"press"
-                                          button:button
-                                            mask:self.pressedMouseButtonsMask
-                                       synthetic:NO];
-    }
-
-    if (shouldSendAbsolute) {
-        [self recordAbsoluteInputDiagnosticsFrom:@"sendAbsoluteMouseButtonSync"
-                                               x:hostX
-                                               y:hostY
-                                           width:referenceWidth
-                                          height:referenceHeight];
-    }
-
-    HIDDispatchInput(self, inputCtx, ^{
-        if (shouldSendAbsolute) {
-            LiSendMousePositionEventCtx(inputCtx, hostX, hostY, referenceWidth, referenceHeight);
+        if (!self.shouldSendInputEvents) {
+            return;
         }
-        LiSendMouseButtonEventCtx(inputCtx,
-                                  pressed ? BUTTON_ACTION_PRESS : BUTTON_ACTION_RELEASE,
-                                  button);
-    });
 
-    if (!pressed) {
-        self.pressedMouseButtonsMask &= ~HIDMouseButtonBitForButton(button);
-        [self recordMouseButtonDiagnosticsAction:@"release"
-                                          button:button
-                                            mask:self.pressedMouseButtonsMask
-                                       synthetic:NO];
+        if ([self.precisionTouchpad consumeMouseButton:button pressed:pressed]) {
+            return;
+        }
+
+        PML_INPUT_STREAM_CONTEXT inputCtx = HIDInputContext(self);
+        if (!HIDValidateInputContext(inputCtx, pressed ? "sendMouseButtonPressSynced" : "sendMouseButtonReleaseSynced")) {
+            return;
+        }
+
+        short hostX = 0;
+        short hostY = 0;
+        short referenceWidth = 0;
+        short referenceHeight = 0;
+        BOOL shouldSendAbsolute = HIDAbsoluteMousePositionForViewPoint(viewPoint,
+                                                                       referenceSize,
+                                                                       clampToBounds,
+                                                                       &hostX,
+                                                                       &hostY,
+                                                                       &referenceWidth,
+                                                                       &referenceHeight);
+        if (shouldSendAbsolute &&
+            hostX == self.lastAbsolutePointerHostX &&
+            hostY == self.lastAbsolutePointerHostY &&
+            referenceWidth == self.lastAbsolutePointerReferenceWidth &&
+            referenceHeight == self.lastAbsolutePointerReferenceHeight) {
+            if (self.inputDiagnosticsEnabled) {
+                @synchronized (self.inputDiagnosticsLock) {
+                    self.inputDiagnosticsAbsoluteDuplicateSkips += 1;
+                }
+            }
+            shouldSendAbsolute = NO;
+        }
+
+        if (pressed) {
+            self.pressedMouseButtonsMask |= HIDMouseButtonBitForButton(button);
+            [self recordMouseButtonDiagnosticsAction:@"press"
+                                              button:button
+                                                mask:self.pressedMouseButtonsMask
+                                           synthetic:NO];
+        }
+
+        if (shouldSendAbsolute) {
+            [self recordAbsoluteInputDiagnosticsFrom:@"sendAbsoluteMouseButtonSync"
+                                                   x:hostX
+                                                   y:hostY
+                                               width:referenceWidth
+                                              height:referenceHeight];
+        }
+
+        HIDDispatchMouseButtonInput(self, inputCtx, pressed, ^{
+            if (shouldSendAbsolute) {
+                LiSendMousePositionEventCtx(inputCtx, hostX, hostY, referenceWidth, referenceHeight);
+            }
+            LiSendMouseButtonEventCtx(inputCtx,
+                                      pressed ? BUTTON_ACTION_PRESS : BUTTON_ACTION_RELEASE,
+                                      button);
+        });
+
+        if (!pressed) {
+            self.pressedMouseButtonsMask &= ~HIDMouseButtonBitForButton(button);
+            [self recordMouseButtonDiagnosticsAction:@"release"
+                                              button:button
+                                                mask:self.pressedMouseButtonsMask
+                                           synthetic:NO];
+        }
     }
 }
 

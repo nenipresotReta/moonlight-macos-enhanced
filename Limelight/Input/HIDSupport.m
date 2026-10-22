@@ -468,32 +468,45 @@ static short HIDVirtualKeyForTypedCharacter(UniChar character) {
     return __atomic_load_n(&_shouldSendInputEvents, __ATOMIC_ACQUIRE);
 }
 - (void)setShouldSendInputEvents:(BOOL)enabled {
-    BOOL wasEnabled = __atomic_load_n(&_shouldSendInputEvents, __ATOMIC_ACQUIRE);
-    if (wasEnabled && !enabled) {
-        [self.precisionTouchpad reset];
-        [self releaseAllPressedMouseButtons];
-        [self releaseAllModifierKeys];
-        if (self.controllerDriver == 0) {
-            PML_INPUT_STREAM_CONTEXT input = HIDInputContext(self);
-            if (HIDValidateInputContext(input, "pause-controller-input")) {
-                int player = self.controller.playerIndex;
-                HIDDispatchInput(self, input, ^{
-                    LiSendMultiControllerEventCtx(input, player, 1, 0, 0, 0, 0, 0, 0, 0);
-                });
+    @synchronized (self) {
+        BOOL wasEnabled = __atomic_load_n(&_shouldSendInputEvents, __ATOMIC_ACQUIRE);
+        if (wasEnabled && !enabled) {
+            [self.precisionTouchpad reset];
+            [self releaseAllPressedMouseButtons];
+            [self releaseAllModifierKeys];
+            if (self.controllerDriver == 0) {
+                PML_INPUT_STREAM_CONTEXT input = HIDInputContext(self);
+                if (HIDValidateInputContext(input, "pause-controller-input")) {
+                    int player = self.controller.playerIndex;
+                    HIDDispatchInput(self, input, ^{
+                        LiSendMultiControllerEventCtx(input, player, 1, 0, 0, 0, 0, 0, 0, 0);
+                    });
+                }
             }
+            [self rumbleLowFreqMotor:0 highFreqMotor:0];
+            ControllerMenuGesture gesture = self.controller.menuGesture;
+            ControllerMenuGestureInterrupt(&gesture, self.gamepadMenuPressed);
+            self.controller.menuGesture = gesture;
         }
-        [self rumbleLowFreqMotor:0 highFreqMotor:0];
-        ControllerMenuGesture gesture = self.controller.menuGesture;
-        ControllerMenuGestureInterrupt(&gesture, self.gamepadMenuPressed);
-        self.controller.menuGesture = gesture;
+        __atomic_store_n(&_shouldSendInputEvents, enabled, __ATOMIC_RELEASE);
+        if (!wasEnabled && enabled && self.controllerDriver == 0) [self sendControllerEvent];
     }
-    __atomic_store_n(&_shouldSendInputEvents, enabled, __ATOMIC_RELEASE);
-    if (!wasEnabled && enabled && self.controllerDriver == 0) [self sendControllerEvent];
 }
 
 - (void)setInputContext:(void *)inputContext {
-    _inputContext = inputContext;
-    [self syncScrollTraceDiagnosticsPreferenceToInputContext];
+    @synchronized (self) {
+        if (_inputContext != inputContext) {
+            self.mouseButtonInputGeneration += 1;
+            self.mouseButtonContextGeneration += 1;
+            self.pressedMouseButtonsMask = 0;
+            @synchronized (self.inputDiagnosticsLock) {
+                self.lastAbsolutePointerReferenceWidth = 0;
+                self.lastAbsolutePointerReferenceHeight = 0;
+            }
+        }
+        _inputContext = inputContext;
+        [self syncScrollTraceDiagnosticsPreferenceToInputContext];
+    }
 }
 
 - (void)refreshInputDiagnosticsPreference {
