@@ -10,7 +10,9 @@ SANITIZE=1 python3 tests/usb-startup-timeout/run.py
 The fixture compiles the **entire production `RemoteUSBForwardingSession.m`**;
 only the reverse tunnel is replaced with a controllable double. A compiled C
 child stands in for `moonlight-usbd`. The Swift fixture compiles the unchanged
-production ViewModel against host/UI/session doubles. No USB devices, network,
+production ViewModel against host/UI/session doubles. An additional typecheck
+imports the real Objective-C session header and requires warning-free main-actor
+isolation using the project's Swift 5 language mode. No USB devices, network,
 installed application, or saved settings are accessed. Compilation products and
 helper executables live in a temporary directory.
 

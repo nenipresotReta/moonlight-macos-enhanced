@@ -42,17 +42,18 @@ typedef NS_ENUM(NSInteger, MLRemoteUSBForwardingState) {
 @property(nonatomic, copy, readonly, nullable) NSError *error;
 @property(nonatomic, readonly) uint16_t localPort;
 
-- (void)refreshDevicesWithCompletion:(void (^)(NSArray<MLRemoteUSBDevice *> *devices,
+/// Public completions are delivered on the main queue.
+- (void)refreshDevicesWithCompletion:(void (NS_SWIFT_UI_ACTOR ^)(NSArray<MLRemoteUSBDevice *> *devices,
                                                 NSError * _Nullable error))completion;
 - (void)startExporterForDevice:(MLRemoteUSBDevice *)device
-                    completion:(void (^)(uint16_t localPort,
+                    completion:(void (NS_SWIFT_UI_ACTOR ^)(uint16_t localPort,
                                          NSError * _Nullable error))completion;
 - (void)startForwardingForDevice:(MLRemoteUSBDevice *)device
                             host:(NSString *)host
                             port:(uint16_t)port
                            token:(NSString *)token
                       serverCert:(NSData *)serverCert
-                       completion:(void (^)(NSError * _Nullable error))completion;
+                       completion:(void (NS_SWIFT_UI_ACTOR ^)(NSError * _Nullable error))completion;
 /// Cancels pending work immediately; helper/tunnel teardown continues off the caller queue.
 /// Completions for stopped or superseded requests are discarded.
 - (void)stop;
