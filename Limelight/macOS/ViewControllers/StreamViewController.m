@@ -1782,7 +1782,7 @@ highFreqMotor:(unsigned short)highFreqMotor {
             return;
         }
         strongSelf.pendingHybridRemoteCursorSync = NO;
-        [strongSelf reconcileHybridFreeMouseAnchorToCurrentPointer];
+        [strongSelf synchronizeCoreHIDFreeMousePointer];
     };
     [self resetInputDiagnosticsState];
     [self refreshInputDiagnosticsPreference];

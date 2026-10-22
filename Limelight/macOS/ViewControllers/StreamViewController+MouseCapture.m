@@ -19,6 +19,16 @@ static CGFloat const MLCoreHIDFreeMouseExitThreshold = 1.0;
 static CGFloat const MLCoreHIDFreeMouseReentryDelayMs = 0.0;
 static CGFloat const MLCoreHIDFreeMouseReentryInset = 0.0;
 
+static MLFreeMouseExitEdge MLFreeMouseExitEdgeForVirtualPoint(NSPoint point, NSPoint motion, NSRect bounds) {
+    if (NSIsEmptyRect(bounds) || !isfinite(point.x) || !isfinite(point.y) ||
+        !isfinite(motion.x) || !isfinite(motion.y)) return MLFreeMouseExitEdgeNone;
+    if (point.x <= NSMinX(bounds) && motion.x < 0.0) return MLFreeMouseExitEdgeLeft;
+    if (point.x >= NSMaxX(bounds) && motion.x > 0.0) return MLFreeMouseExitEdgeRight;
+    if (point.y <= NSMinY(bounds) && motion.y < 0.0) return MLFreeMouseExitEdgeBottom;
+    if (point.y >= NSMaxY(bounds) && motion.y > 0.0) return MLFreeMouseExitEdgeTop;
+    return MLFreeMouseExitEdgeNone;
+}
+
 static inline CGFloat MLClampCGFloat(CGFloat value, CGFloat minValue, CGFloat maxValue) {
     return MIN(MAX(value, minValue), maxValue);
 }
@@ -193,6 +203,7 @@ static inline NSPoint MLClampFreeMousePointToExitEdge(NSPoint point,
     return self.isRemoteDesktopMode &&
            self.isMouseCaptured &&
            [self.hidSupport shouldUseCoreHIDFreeMouseAbsoluteSyncForCurrentConfiguration] &&
+           [self.hidSupport hasRecentCoreHIDMouseMovement] &&
            window != nil &&
            window.isKeyWindow &&
            window.isMainWindow &&
@@ -416,6 +427,10 @@ static inline NSPoint MLClampFreeMousePointToExitEdge(NSPoint point,
 }
 
 - (NSPoint)boundaryInteractionViewPointForMouseEvent:(NSEvent *)event {
+    NSPoint virtualPoint;
+    if ([self currentCoreHIDVirtualCursorPoint:&virtualPoint referenceSize:NULL]) {
+        return virtualPoint;
+    }
     if ([self.hidSupport shouldUseCoreHIDFreeMouseAbsoluteSyncForCurrentConfiguration]) {
         return [self currentMouseLocationInViewCoordinates];
     }
@@ -1227,8 +1242,50 @@ static inline NSPoint MLClampFreeMousePointToExitEdge(NSPoint point,
         return;
     }
 
+    if (![self.hidSupport hasRecentCoreHIDMouseMovement]) {
+        // AppKit takes over when the raw device is idle (for example, a trackpad).
+        // Preserve that position as the next raw anchor instead of reviving an
+        // old virtual trajectory when the external mouse starts moving again.
+        [self.hidSupport sendAbsoluteMousePositionForViewPoint:currentPoint
+                                              referenceSize:self.view.bounds.size clampToBounds:YES];
+        return;
+    }
     [self.hidSupport seedFreeMouseVirtualCursorWithViewPoint:currentPoint
                                                referenceSize:self.view.bounds.size];
+}
+
+- (void)synchronizeCoreHIDFreeMousePointer {
+    if (![self shouldUseCoreHIDVirtualSemanticLocation]) return;
+
+    [self reconcileHybridFreeMouseAnchorToCurrentPointer];
+    NSPoint point, motion;
+    NSSize referenceSize;
+    if (![self.hidSupport getFreeMouseVirtualCursorPoint:&point referenceSize:&referenceSize motion:&motion] ||
+        !NSEqualSizes(referenceSize, self.view.bounds.size)) return;
+
+    MLFreeMouseExitEdge edge = MLFreeMouseExitEdgeForVirtualPoint(point, motion, self.view.bounds);
+    if ([self shouldUncaptureFreeMouseForComputedExitEdge:edge]) {
+        [self uncaptureFreeMouseForExitEdge:edge event:nil syncViewPoint:point
+                                      code:@"MUC108" reason:@"corehid-virtual-edge"];
+        return;
+    }
+
+    // Keep native hit-testing and the visible remote cursor in the same place.
+    // In particular, OS acceleration must not carry the hidden system pointer
+    // into another window while the remote pointer is still inside the stream.
+    NSRect bounds = self.view.bounds;
+    point.x = MLClampCGFloat(point.x, NSMinX(bounds) + 0.5, NSMaxX(bounds) - 0.5);
+    point.y = MLClampCGFloat(point.y, NSMinY(bounds) + 0.5, NSMaxY(bounds) - 0.5);
+    NSPoint current = [self currentMouseLocationInViewCoordinates];
+    if (fabs(current.x - point.x) < 0.5 && fabs(current.y - point.y) < 0.5) return;
+    CGDirectDisplayID displayID;
+    CGPoint cursorPoint;
+    if ([self coreGraphicsCursorPointForViewPoint:point event:nil exitEdge:MLFreeMouseExitEdgeNone
+                                    outDisplayID:&displayID outPoint:&cursorPoint]) {
+        CGError error = CGDisplayMoveCursorToPoint(displayID, cursorPoint);
+        if (error == kCGErrorSuccess) return;
+    }
+    [self uncaptureMouseWithCode:@"MUC109" reason:@"corehid-pointer-sync-failed"];
 }
 
 - (NSPoint)resolvedAbsoluteSyncViewPointForMouseEvent:(NSEvent *)event
@@ -1360,6 +1417,9 @@ static inline NSPoint MLClampFreeMousePointToExitEdge(NSPoint point,
                        referenceSize:self.view.bounds.size
                        clampToBounds:YES];
     self.pendingHybridRemoteCursorSync = NO;
+    if (!pressed) {
+        [self synchronizeCoreHIDFreeMousePointer];
+    }
 }
 
 - (BOOL)consumePendingHybridRemoteCursorSyncForEvent:(NSEvent *)event reason:(NSString *)reason {
@@ -1420,9 +1480,6 @@ static inline NSPoint MLClampFreeMousePointToExitEdge(NSPoint point,
     if (!self.isRemoteDesktopMode || !self.isMouseCaptured) {
         return MLFreeMouseExitEdgeNone;
     }
-    if (![self isWindowFullscreen] && ![self isWindowBorderlessMode]) {
-        return MLFreeMouseExitEdgeNone;
-    }
     if (!self.view.window || !self.view.window.isKeyWindow) {
         return MLFreeMouseExitEdgeNone;
     }
@@ -1432,29 +1489,31 @@ static inline NSPoint MLClampFreeMousePointToExitEdge(NSPoint point,
         return MLFreeMouseExitEdgeNone;
     }
 
+    NSPoint point = [self currentMouseLocationInViewCoordinates];
+    NSPoint motion = NSMakePoint(event.deltaX, event.deltaY);
+    NSSize referenceSize;
+    BOOL virtualOwner = [self shouldUseCoreHIDVirtualSemanticLocation] &&
+        [self.hidSupport getFreeMouseVirtualCursorPoint:&point referenceSize:&referenceSize motion:&motion] &&
+        NSEqualSizes(referenceSize, bounds.size);
+    if (virtualOwner) {
+        return MLFreeMouseExitEdgeForVirtualPoint(point, motion, bounds);
+    }
+    // If the geometry changed between callbacks, use the system point only
+    // until the main-thread seed has established the new reference size.
+    point = [self currentMouseLocationInViewCoordinates];
+    motion = NSMakePoint(event.deltaX, event.deltaY);
+    if (![self isWindowFullscreen] && ![self isWindowBorderlessMode]) {
+        return MLFreeMouseExitEdgeNone;
+    }
     BOOL tightHandoff = [self shouldUseCoreHIDTightFreeMouseHandoff];
-    NSPoint currentPoint = [self currentMouseLocationInViewCoordinates];
-    NSPoint point = tightHandoff
-        ? currentPoint
-        : [self boundaryInteractionViewPointForMouseEvent:event];
     CGFloat threshold = tightHandoff ? MLCoreHIDFreeMouseExitThreshold : 2.0;
-    MLFreeMouseExitEdge currentPointerExitEdge = [self freeMouseExitEdgeForOutsideViewPoint:currentPoint];
-    if (currentPointerExitEdge != MLFreeMouseExitEdgeNone) {
-        return currentPointerExitEdge;
-    }
-
     MLFreeMouseExitEdge semanticExitEdge = [self freeMouseExitEdgeForOutsideViewPoint:point];
-    if (tightHandoff && semanticExitEdge != MLFreeMouseExitEdgeNone) {
-        return semanticExitEdge;
-    }
-    if (!tightHandoff && semanticExitEdge != MLFreeMouseExitEdgeNone) {
-        return semanticExitEdge;
-    }
+    if (semanticExitEdge != MLFreeMouseExitEdgeNone) return semanticExitEdge;
 
-    BOOL pushingLeft = point.x <= NSMinX(bounds) + threshold && event.deltaX < 0.0;
-    BOOL pushingRight = point.x >= NSMaxX(bounds) - threshold && event.deltaX > 0.0;
-    BOOL pushingBottom = point.y <= NSMinY(bounds) + threshold && event.deltaY < 0.0;
-    BOOL pushingTop = point.y >= NSMaxY(bounds) - threshold && event.deltaY > 0.0;
+    BOOL pushingLeft = point.x <= NSMinX(bounds) + threshold && motion.x < 0.0;
+    BOOL pushingRight = point.x >= NSMaxX(bounds) - threshold && motion.x > 0.0;
+    BOOL pushingBottom = point.y <= NSMinY(bounds) + threshold && motion.y < 0.0;
+    BOOL pushingTop = point.y >= NSMaxY(bounds) - threshold && motion.y > 0.0;
 
     MLFreeMouseExitEdge candidateEdge = semanticExitEdge;
     if (candidateEdge == MLFreeMouseExitEdgeNone) {
@@ -2131,6 +2190,11 @@ static inline NSPoint MLClampFreeMousePointToExitEdge(NSPoint point,
             [self scheduleEdgeMenuAutoCollapse];
         }
         [self logControlOrbStateWithReason:@"area-exit"];
+        return;
+    }
+
+    if ([self shouldUseCoreHIDVirtualSemanticLocation]) {
+        [self synchronizeCoreHIDFreeMousePointer];
         return;
     }
 

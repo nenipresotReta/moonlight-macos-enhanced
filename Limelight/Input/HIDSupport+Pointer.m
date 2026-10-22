@@ -105,6 +105,8 @@ static BOOL HIDAbsolutePointerBatchMatches(HIDAbsolutePointerBatch *batch,
         self.freeMouseVirtualCursorHasAnchor = NO;
         self.freeMouseVirtualCursorPoint = NSZeroPoint;
         self.freeMouseVirtualCursorReferenceSize = NSZeroSize;
+        self.freeMouseVirtualCursorMotion = NSZeroPoint;
+        HIDInvalidateCoreHIDFreeMouseAbsoluteSync(self);
     }
 }
 
@@ -121,6 +123,7 @@ static BOOL HIDAbsolutePointerBatchMatches(HIDAbsolutePointerBatch *batch,
             return;
         }
         self.freeMouseVirtualCursorPoint = HIDClampFreeMousePoint(viewPoint, referenceSize);
+        self.freeMouseVirtualCursorMotion = NSZeroPoint;
         self.freeMouseVirtualCursorReferenceSize = referenceSize;
         self.freeMouseVirtualCursorHasAnchor = YES;
     }
@@ -166,9 +169,16 @@ static BOOL HIDAbsolutePointerBatchMatches(HIDAbsolutePointerBatch *batch,
 
 - (BOOL)getFreeMouseVirtualCursorPoint:(NSPoint *)viewPoint
                          referenceSize:(NSSize *)referenceSize {
+    return [self getFreeMouseVirtualCursorPoint:viewPoint referenceSize:referenceSize motion:NULL];
+}
+
+- (BOOL)getFreeMouseVirtualCursorPoint:(NSPoint *)viewPoint
+                         referenceSize:(NSSize *)referenceSize
+                                motion:(NSPoint *)motion {
     BOOL hasAnchor = NO;
     NSPoint currentPoint = NSZeroPoint;
     NSSize currentReferenceSize = NSZeroSize;
+    NSPoint currentMotion = NSZeroPoint;
 
     @synchronized (self.freeMouseVirtualCursorLock) {
         hasAnchor = self.freeMouseVirtualCursorHasAnchor &&
@@ -177,6 +187,7 @@ static BOOL HIDAbsolutePointerBatchMatches(HIDAbsolutePointerBatch *batch,
         if (hasAnchor) {
             currentPoint = self.freeMouseVirtualCursorPoint;
             currentReferenceSize = self.freeMouseVirtualCursorReferenceSize;
+            currentMotion = self.freeMouseVirtualCursorMotion;
         }
     }
 
@@ -189,6 +200,9 @@ static BOOL HIDAbsolutePointerBatchMatches(HIDAbsolutePointerBatch *batch,
     }
     if (referenceSize != NULL) {
         *referenceSize = currentReferenceSize;
+    }
+    if (motion != NULL) {
+        *motion = currentMotion;
     }
     return YES;
 }
@@ -335,6 +349,7 @@ static BOOL HIDAbsolutePointerBatchMatches(HIDAbsolutePointerBatch *batch,
         predictedPoint = HIDClampFreeMousePoint(predictedPoint, self.freeMouseVirtualCursorReferenceSize);
 
         self.freeMouseVirtualCursorPoint = predictedPoint;
+        self.freeMouseVirtualCursorMotion = NSMakePoint(viewDeltaX, viewDeltaY);
         referenceSize = self.freeMouseVirtualCursorReferenceSize;
         // Keep integration and submission atomic across concurrent HID callbacks.
         [self sendCoalescedAbsoluteMousePositionForViewPoint:predictedPoint

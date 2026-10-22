@@ -44,6 +44,13 @@ static void LiSendMouseButtonEventCtx(InputContext *ctx, int action, int button)
 - (BOOL)consumeMouseButton:(int)button pressed:(BOOL)pressed { return self.consumed; }
 @end
 #define MLPrecisionTouchpad Touchpad
+typedef void (^HIDFreeMouseAbsoluteSyncHandler)(void);
+@interface GCMouse : NSObject
++ (NSArray *)mice;
+@end
+@implementation GCMouse
++ (NSArray *)mice { return @[]; }
+@end
 @class HIDAbsolutePointerBatch;
 @interface HIDSupport : NSObject
 /* PROPERTIES */
@@ -52,6 +59,7 @@ static void LiSendMouseButtonEventCtx(InputContext *ctx, int action, int button)
 @property void *inputContext;
 @property NSObject *coreHIDMouseDriver;
 @property int relativeCalls;
+@property (copy) HIDFreeMouseAbsoluteSyncHandler freeMouseAbsoluteSyncHandler;
 - (void)sendAbsoluteMousePositionForViewPoint:(NSPoint)p referenceSize:(NSSize)s clampToBounds:(BOOL)c;
 - (void)resetFreeMouseVirtualCursorState;
 - (BOOL)reserveDetailedInputDiagnosticsLogSequence:(NSUInteger *)sequence;
@@ -77,13 +85,16 @@ static void LiSendMouseButtonEventCtx(InputContext *ctx, int action, int button)
 static InputContext *HIDInputContext(HIDSupport *s) { return &context; }
 static BOOL HIDValidateInputContext(InputContext *ctx, const char *reason) { return validContext; }
 static CGFloat HIDPointerSensitivityForHost(Host *h) { return sensitivity; }
-static void HIDInvalidateCoreHIDFreeMouseAbsoluteSync(HIDSupport *s) {}
 static void HIDDispatchInput(HIDSupport *s, InputContext *ctx, dispatch_block_t block) { dispatch_async(s.inputQueue, block); }
 static BOOL HIDAbsoluteMousePayloadForEvent(NSEvent *e, BOOL c, short *x, short *y, short *w, short *h) {
     *x = 800; *y = 6400; *w = 16000; *h = 9600; return YES;
 }
 /* HELPERS */
 @implementation HIDSupport
+- (void)registerMouseCallbacks:(GCMouse *)mouse {}
+- (void)unregisterMouseCallbacks:(GCMouse *)mouse {}
+- (void)tearDownCoreHIDMouseDriver {}
+- (void)setupCoreHIDMouseDriverIfNeeded {}
 - (BOOL)reserveDetailedInputDiagnosticsLogSequence:(NSUInteger *)sequence { return NO; }
 - (BOOL)hasPressedMouseButtons { return self.pressedMouseButtonsMask != 0; }
 - (void)recordMouseButtonDiagnosticsAction:(NSString *)a button:(int)b mask:(uint32_t)m synthetic:(BOOL)s {}
