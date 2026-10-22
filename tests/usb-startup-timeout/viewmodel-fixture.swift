@@ -30,11 +30,11 @@ final class MLRemoteUSBDevice { let busID = "1-1"; let product = "Test device" }
 final class MLRemoteUSBForwardingSession {
   static let instance = MLRemoteUSBForwardingSession()
   static func shared() -> MLRemoteUSBForwardingSession { instance }
-  var refreshes: [([MLRemoteUSBDevice], Error?) -> Void] = []
-  var starts: [(Error?) -> Void] = []
-  func refreshDevices(completion: @escaping ([MLRemoteUSBDevice], Error?) -> Void) { refreshes.append(completion) }
+  var refreshes: [@MainActor ([MLRemoteUSBDevice], Error?) -> Void] = []
+  var starts: [@MainActor (Error?) -> Void] = []
+  func refreshDevices(completion: @escaping @MainActor ([MLRemoteUSBDevice], Error?) -> Void) { refreshes.append(completion) }
   func startForwarding(for device: MLRemoteUSBDevice, host: String, port: UInt16, token: String,
-                       serverCert: Data, completion: @escaping (Error?) -> Void) { starts.append(completion) }
+                       serverCert: Data, completion: @escaping @MainActor (Error?) -> Void) { starts.append(completion) }
   func stop() {}
 }
 @main struct USBViewModelTests {

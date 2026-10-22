@@ -23,3 +23,15 @@ with tempfile.TemporaryDirectory(prefix="moonlight-usb-startup-") as temp:
                     str(ROOT / "Limelight/macOS/ViewControllers/RemoteUSBForwardingViewModel.swift"),
                     str(TEST / "viewmodel-fixture.swift"), "-o", viewmodel], check=True)
     subprocess.run([viewmodel], check=True, timeout=5)
+    # Exercise the actual Objective-C importer as well as the Swift doubles.
+    # Plain Swift closures can hide missing actor annotations on ObjC callbacks.
+    stubs = Path(temp) / "importer-stubs.swift"
+    stubs.write_text((TEST / "viewmodel-fixture.swift").read_text().split("final class MLRemoteUSBDevice", 1)[0])
+    imported = subprocess.run(["xcrun", "swiftc", "-swift-version", "5", "-typecheck",
+                               "-module-cache-path", str(Path(temp) / "swift-cache"),
+                               "-import-objc-header", str(ROOT / "Limelight/Network/RemoteUSBForwardingSession.h"),
+                               str(stubs), str(ROOT / "Limelight/macOS/ViewControllers/RemoteUSBForwardingViewModel.swift")],
+                              check=True, capture_output=True, text=True)
+    if "warning:" in imported.stderr:
+        raise SystemExit(imported.stderr)
+    print("PASS: real Objective-C callback imports preserve main-actor isolation without warnings")
