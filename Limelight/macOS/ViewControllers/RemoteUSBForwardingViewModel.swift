@@ -11,9 +11,17 @@ final class RemoteUSBForwardingViewModel: ObservableObject {
   private var capability: [String: Any] = [:]
   private var hostAddress = ""
   private var serverCertificate: Data?
+  private var requestID = UUID()
 
   func refresh(host: Host?) {
     stop()
+    // A capability token belongs to the selected host. Disable Start while
+    // refreshing so an old device/token cannot be paired with the new address.
+    devices = []
+    capability = [:]
+    capabilityAvailable = false
+    hostAddress = ""
+    serverCertificate = nil
     guard let host, host.id != SettingsModel.globalHostId,
       let temporaryHosts = DataManager().getHosts() as? [TemporaryHost],
       let temporaryHost = temporaryHosts.first(where: { $0.uuid == host.id }),
@@ -21,12 +29,11 @@ final class RemoteUSBForwardingViewModel: ObservableObject {
       !address.isEmpty,
       let certificate = temporaryHost.serverCert
     else {
-      devices = []
-      capabilityAvailable = false
       status = "Select a paired host"
       return
     }
 
+    let requestID = self.requestID
     hostAddress = address
     serverCertificate = certificate
     status = "Checking Foundation USB forwarding…"
@@ -36,26 +43,29 @@ final class RemoteUSBForwardingViewModel: ObservableObject {
     }
     DispatchQueue.global(qos: .userInitiated).async { [weak self] in
       let capability = http.fetchSunshineUSBForwardingCapability() ?? [:]
-      self?.session.refreshDevices { [weak self] devices, error in
-        guard let self else { return }
-        self.devices = devices
-        self.capability = capability
-        self.capabilityAvailable = (capability["enabled"] as? NSNumber)?.boolValue == true
-          && (capability["available"] as? NSNumber)?.boolValue == true
-        if !self.capabilityAvailable {
-          if (capability["statusCode"] as? NSNumber)?.intValue != 200 {
-            self.status = "Unable to read Foundation USB forwarding capability"
-          } else if (capability["enabled"] as? NSNumber)?.boolValue == false {
-            self.status = "Enable USB forwarding in Foundation Sunshine on the host"
+      DispatchQueue.main.async { [weak self] in
+        guard let self, self.requestID == requestID else { return }
+        self.session.refreshDevices { [weak self] devices, error in
+          guard let self, self.requestID == requestID else { return }
+          self.devices = devices
+          self.capability = capability
+          self.capabilityAvailable = (capability["enabled"] as? NSNumber)?.boolValue == true
+            && (capability["available"] as? NSNumber)?.boolValue == true
+          if !self.capabilityAvailable {
+            if (capability["statusCode"] as? NSNumber)?.intValue != 200 {
+              self.status = "Unable to read Foundation USB forwarding capability"
+            } else if (capability["enabled"] as? NSNumber)?.boolValue == false {
+              self.status = "Enable USB forwarding in Foundation Sunshine on the host"
+            } else {
+              self.status = "Foundation Sunshine USB forwarding service is unavailable"
+            }
+          } else if let error {
+            self.status = error.localizedDescription
+          } else if devices.isEmpty {
+            self.status = "No claimable USB devices"
           } else {
-            self.status = "Foundation Sunshine USB forwarding service is unavailable"
+            self.status = "Ready"
           }
-        } else if let error {
-          self.status = error.localizedDescription
-        } else if devices.isEmpty {
-          self.status = "No claimable USB devices"
-        } else {
-          self.status = "Ready"
         }
       }
     }
@@ -71,6 +81,8 @@ final class RemoteUSBForwardingViewModel: ObservableObject {
       return
     }
 
+    requestID = UUID()
+    let requestID = self.requestID
     selectedBusID = device.busID
     status = "Connecting USB/IP…"
     session.startForwarding(for: device,
@@ -78,7 +90,7 @@ final class RemoteUSBForwardingViewModel: ObservableObject {
                             port: port,
                             token: token,
                             serverCert: certificate) { [weak self] error in
-      guard let self else { return }
+      guard let self, self.requestID == requestID else { return }
       if let error {
         self.status = error.localizedDescription
         self.selectedBusID = nil
@@ -90,6 +102,7 @@ final class RemoteUSBForwardingViewModel: ObservableObject {
   }
 
   func stop() {
+    requestID = UUID()
     session.stop()
     selectedBusID = nil
     if status.hasPrefix("Forwarding") || status.hasPrefix("Connecting") {

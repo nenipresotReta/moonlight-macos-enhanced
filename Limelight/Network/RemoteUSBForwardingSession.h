@@ -53,6 +53,8 @@ typedef NS_ENUM(NSInteger, MLRemoteUSBForwardingState) {
                            token:(NSString *)token
                       serverCert:(NSData *)serverCert
                        completion:(void (^)(NSError * _Nullable error))completion;
+/// Cancels pending work immediately; helper/tunnel teardown continues off the caller queue.
+/// Completions for stopped or superseded requests are discarded.
 - (void)stop;
 
 @end
