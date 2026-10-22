@@ -15,18 +15,32 @@
     NSManagedObjectContext *_managedObjectContext;
 }
 
-- (id) init {
-    self = [super init];
-    
-    _managedObjectContext = [[NSManagedObjectContext alloc] initWithConcurrencyType:NSPrivateQueueConcurrencyType];
-    [_managedObjectContext setPersistentStoreCoordinator:[DatabaseSingleton shared].persistentStoreCoordinator];
-    [_managedObjectContext setMergePolicy:NSMergeByPropertyObjectTrumpMergePolicy];
-    
-    return self;
+// A failed store open must not leave a context with no persistent store.
+// Resolve lazily for every operation so an existing DataManager can recover
+// after a temporary failure without creating an empty replacement database.
+- (NSManagedObjectContext *)databaseContext {
+    @synchronized (self) {
+        if (_managedObjectContext == nil) {
+            NSPersistentStoreCoordinator *coordinator = [DatabaseSingleton shared].persistentStoreCoordinator;
+            if (coordinator == nil) {
+                Log(LOG_E, @"Database operation skipped because the persistent store is unavailable");
+                return nil;
+            }
+            NSManagedObjectContext *context = [[NSManagedObjectContext alloc] initWithConcurrencyType:NSPrivateQueueConcurrencyType];
+            context.persistentStoreCoordinator = coordinator;
+            context.mergePolicy = NSMergeByPropertyObjectTrumpMergePolicy;
+            _managedObjectContext = context;
+        }
+        return _managedObjectContext;
+    }
+}
+
+- (BOOL)isAvailable {
+    return [self databaseContext] != nil;
 }
 
 - (void) updateUniqueId:(NSString*)uniqueId {
-    [_managedObjectContext performBlockAndWait:^{
+    [[self databaseContext] performBlockAndWait:^{
         [self retrieveSettings].uniqueId = uniqueId;
         [self saveData];
     }];
@@ -35,7 +49,7 @@
 - (NSString*) getUniqueId {
     __block NSString *uid;
     
-    [_managedObjectContext performBlockAndWait:^{
+    [[self databaseContext] performBlockAndWait:^{
         uid = [self retrieveSettings].uniqueId;
     }];
 
@@ -55,7 +69,7 @@
                        enableHdr:(BOOL)enableHdr
                   btMouseSupport:(BOOL)btMouseSupport {
     
-    [_managedObjectContext performBlockAndWait:^{
+    [[self databaseContext] performBlockAndWait:^{
         Settings* settingsToSave = [self retrieveSettings];
         settingsToSave.framerate = [NSNumber numberWithInteger:framerate];
         settingsToSave.bitrate = [NSNumber numberWithInteger:bitrate];
@@ -75,7 +89,7 @@
 }
 
 - (void) updateHost:(TemporaryHost *)host {
-    [_managedObjectContext performBlockAndWait:^{
+    [[self databaseContext] performBlockAndWait:^{
         // Add a new persistent managed object if one doesn't exist
         Host* parent = [self getHostForTemporaryHost:host withHostRecords:[self fetchRecords:@"Host"]];
         if (parent == nil) {
@@ -91,7 +105,7 @@
 }
 
 - (void) updateAppsForExistingHost:(TemporaryHost *)host {
-    [_managedObjectContext performBlockAndWait:^{
+    [[self databaseContext] performBlockAndWait:^{
         Host* parent = [self getHostForTemporaryHost:host withHostRecords:[self fetchRecords:@"Host"]];
         if (parent == nil) {
             // The host must exist to be updated
@@ -122,7 +136,7 @@
 - (TemporarySettings*) getSettings {
     __block TemporarySettings *tempSettings;
     
-    [_managedObjectContext performBlockAndWait:^{
+    [[self databaseContext] performBlockAndWait:^{
         tempSettings = [[TemporarySettings alloc] initFromSettings:[self retrieveSettings]];
     }];
     
@@ -144,7 +158,7 @@
 }
 
 - (void) removeApp:(TemporaryApp*)app {
-    [_managedObjectContext performBlockAndWait:^{
+    [[self databaseContext] performBlockAndWait:^{
         App* managedApp = [self getAppForTemporaryApp:app withAppRecords:[self fetchRecords:@"App"]];
         if (managedApp != nil) {
             [self->_managedObjectContext deleteObject:managedApp];
@@ -154,7 +168,7 @@
 }
 
 - (void) removeHost:(TemporaryHost*)host {
-    [_managedObjectContext performBlockAndWait:^{
+    [[self databaseContext] performBlockAndWait:^{
         Host* managedHost = [self getHostForTemporaryHost:host withHostRecords:[self fetchRecords:@"Host"]];
         if (managedHost != nil) {
             [self->_managedObjectContext deleteObject:managedHost];
@@ -175,7 +189,7 @@
 - (NSArray*) getHosts {
     __block NSMutableArray *tempHosts = [[NSMutableArray alloc] init];
     
-    [_managedObjectContext performBlockAndWait:^{
+    [[self databaseContext] performBlockAndWait:^{
         NSArray *hosts = [self fetchRecords:@"Host"];
         
         for (Host* host in hosts) {
@@ -187,7 +201,7 @@
 }
 
 - (void) removeHostsWithEmptyUuid {
-    [_managedObjectContext performBlockAndWait:^{
+    [[self databaseContext] performBlockAndWait:^{
         NSArray *hosts = [self fetchRecords:@"Host"];
         BOOL didDelete = NO;
         for (id host in hosts) {
