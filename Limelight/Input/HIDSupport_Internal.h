@@ -99,6 +99,7 @@
 @property (atomic) BOOL freeMouseVirtualCursorRequestedActive;
 @property (nonatomic) BOOL freeMouseVirtualCursorHasAnchor;
 @property (nonatomic) NSPoint freeMouseVirtualCursorPoint;
+@property (nonatomic) NSPoint freeMouseVirtualCursorMotion;
 @property (nonatomic) NSSize freeMouseVirtualCursorReferenceSize;
 @property (nonatomic, strong) NSObject *inputDiagnosticsLock;
 @property (atomic) BOOL inputDiagnosticsEnabled;
@@ -216,6 +217,7 @@
 - (void)registerMouseCallbacks:(GCMouse *)mouse API_AVAILABLE(macos(11.0));
 - (void)unregisterMouseCallbacks:(GCMouse *)mouse API_AVAILABLE(macos(11.0));
 - (BOOL)initializeDisplayLink;
+- (void)scheduleCoreHIDFreeMouseAbsoluteSync;
 - (BOOL)dispatchVirtualFreeMouseDeltaX:(double)deltaX
                                 deltaY:(double)deltaY
                              sourceTag:(NSString *)sourceTag;
@@ -588,8 +590,10 @@ static inline BOOL HIDShouldSuppressRelativeMouse(HIDSupport *support) {
 }
 
 static inline void HIDInvalidateCoreHIDFreeMouseAbsoluteSync(HIDSupport *support) {
-    support.coreHIDFreeMouseAbsoluteSyncScheduled = NO;
-    support.coreHIDFreeMouseAbsoluteSyncToken += 1;
+    @synchronized (support.freeMouseVirtualCursorLock) {
+        support.coreHIDFreeMouseAbsoluteSyncScheduled = NO;
+        support.coreHIDFreeMouseAbsoluteSyncToken += 1;
+    }
 }
 
 static inline uint32_t HIDMouseButtonBitForButton(int button) {

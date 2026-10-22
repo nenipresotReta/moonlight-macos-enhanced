@@ -40,6 +40,27 @@ focus regain and geometry changes. Desktop Sync continues to follow macOS pointe
 speed and acceleration. The two modes can therefore feel different even when
 neither produces event-order reversals.
 
+## Native handoff and live mode regression checks
+
+The default runner also executes `handoff.py`. It extracts the production edge,
+native synchronization, mode-reset and callback scheduling methods, substituting
+native cursor movement and window state. It covers an accelerated system pointer
+leaving before the remote pointer, all four virtual edges, dragging and release,
+windowed operation, entry suppression, AppKit takeover after raw-device idle,
+failed native positioning, and cancellation/coalescing of pending callbacks.
+These checks exercise control flow, not real display scaling or event delivery.
+
+Both follow-up failures reproduce against the first mouse-fix commit:
+
+```sh
+python3 tests/free-mouse-motion/handoff.py --source-ref 1ae66e3 --case mode
+python3 tests/free-mouse-motion/handoff.py --source-ref 1ae66e3 --case handoff
+```
+
+Native cursor alignment is coalesced separately from remote packets. Mode changes
+clear the virtual anchor and cancel pending native alignment; the next seed uses
+the current pointer. Desktop Sync and locked mode do not run native alignment.
+
 ## Manual checks
 
 Automated packet replay cannot establish physical mouse feel or cross-display
@@ -47,3 +68,7 @@ handoff behavior. Before promoting the test build, compare Desktop Sync with
 Automatic/Fast Response while moving continuously and dragging windows. Check
 slow and fast movement, left/right/middle buttons, leaving and re-entering the
 stream, focus changes, resize/fullscreen transitions and locked mouse mode.
+
+Also switch Desktop Sync → Automatic while captured, use a trackpad after the
+external mouse becomes idle, and cross each edge on mixed-scale displays. Check
+that native cursor alignment does not suppress clicks or scroll events.

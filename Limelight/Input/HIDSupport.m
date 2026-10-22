@@ -1638,6 +1638,9 @@ static unsigned short HIDPositionalKeyCode(unsigned short macKeyCode) {
         [self registerMouseCallbacks:mouse];
     }
 
+    // A new motion source must start at the current system pointer, not an
+    // anchor left behind by Desktop Sync or a previous driver configuration.
+    [self resetFreeMouseVirtualCursorState];
     [self tearDownCoreHIDMouseDriver];
     [self setupCoreHIDMouseDriverIfNeeded];
 }
@@ -1771,33 +1774,42 @@ static unsigned short HIDPositionalKeyCode(unsigned short macKeyCode) {
     BOOL dispatchedVirtualFreeMouse = [self dispatchVirtualFreeMouseDeltaX:deltaX
                                                                     deltaY:deltaY
                                                                  sourceTag:@"coreHIDVirtualFreeMouse"];
-    if (dispatchedVirtualFreeMouse) {
-        HIDInvalidateCoreHIDFreeMouseAbsoluteSync(self);
-        return;
-    }
-    if (HIDShouldUseCoreHIDFreeMouseAbsoluteSync(self) && self.freeMouseAbsoluteSyncHandler != nil) {
-        if (!self.coreHIDFreeMouseAbsoluteSyncScheduled) {
-            self.coreHIDFreeMouseAbsoluteSyncScheduled = YES;
-            uint64_t scheduleToken = ++self.coreHIDFreeMouseAbsoluteSyncToken;
-            HIDFreeMouseAbsoluteSyncHandler handler = self.freeMouseAbsoluteSyncHandler;
-            __weak typeof(self) weakSelf = self;
-            dispatch_async(dispatch_get_main_queue(), ^{
-                __strong typeof(weakSelf) strongSelf = weakSelf;
-                if (strongSelf == nil ||
-                    !strongSelf.coreHIDFreeMouseAbsoluteSyncScheduled ||
-                    strongSelf.coreHIDFreeMouseAbsoluteSyncToken != scheduleToken) {
-                    return;
-                }
-                strongSelf.coreHIDFreeMouseAbsoluteSyncScheduled = NO;
-                handler();
-            });
-        }
+    if (dispatchedVirtualFreeMouse ||
+        (HIDShouldUseCoreHIDFreeMouseAbsoluteSync(self) && self.freeMouseAbsoluteSyncHandler != nil)) {
+        [self scheduleCoreHIDFreeMouseAbsoluteSync];
         return;
     }
     HIDInvalidateCoreHIDFreeMouseAbsoluteSync(self);
     [self dispatchRelativeMouseDeltaX:(CGFloat)deltaX
                                deltaY:(CGFloat)deltaY
                             sourceTag:@"coreHIDMouse"];
+}
+
+- (void)scheduleCoreHIDFreeMouseAbsoluteSync {
+    @synchronized (self.freeMouseVirtualCursorLock) {
+        if (self.coreHIDFreeMouseAbsoluteSyncScheduled || self.freeMouseAbsoluteSyncHandler == nil ||
+            !self.shouldSendInputEvents || !HIDShouldUseCoreHIDFreeMouseAbsoluteSync(self)) {
+            return;
+        }
+        self.coreHIDFreeMouseAbsoluteSyncScheduled = YES;
+        uint64_t token = ++self.coreHIDFreeMouseAbsoluteSyncToken;
+        HIDFreeMouseAbsoluteSyncHandler handler = self.freeMouseAbsoluteSyncHandler;
+        __weak typeof(self) weakSelf = self;
+        // Remote packets retain their configured report rate. Coalesce native
+        // cursor/edge work separately so a 1000 Hz mouse cannot flood AppKit.
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 4 * NSEC_PER_MSEC), dispatch_get_main_queue(), ^{
+            __strong typeof(weakSelf) strongSelf = weakSelf;
+            if (strongSelf == nil) return;
+            @synchronized (strongSelf.freeMouseVirtualCursorLock) {
+                if (!strongSelf.coreHIDFreeMouseAbsoluteSyncScheduled ||
+                    strongSelf.coreHIDFreeMouseAbsoluteSyncToken != token) return;
+                strongSelf.coreHIDFreeMouseAbsoluteSyncScheduled = NO;
+            }
+            if (strongSelf.shouldSendInputEvents && HIDShouldUseCoreHIDFreeMouseAbsoluteSync(strongSelf)) {
+                handler();
+            }
+        });
+    }
 }
 
 - (void)coreHIDMouseDriver:(CoreHIDMouseDriver *)driver

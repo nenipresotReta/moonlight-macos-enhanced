@@ -94,6 +94,9 @@ typedef void (^HIDFreeMouseAbsoluteSyncHandler)(void);
 - (BOOL)sendCurrentFreeMouseVirtualCursorPosition;
 - (BOOL)getFreeMouseVirtualCursorPoint:(NSPoint *)viewPoint
                          referenceSize:(NSSize *)referenceSize;
+- (BOOL)getFreeMouseVirtualCursorPoint:(NSPoint *)viewPoint
+                         referenceSize:(NSSize *)referenceSize
+                                motion:(NSPoint *)motion;
 - (void)sendAbsoluteMousePositionForViewPoint:(NSPoint)viewPoint
                                 referenceSize:(NSSize)referenceSize
                                 clampToBounds:(BOOL)clampToBounds;
