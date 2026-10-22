@@ -10,8 +10,10 @@ https://github.com/skyhua0224/moonlight-macos-enhanced.
   changes are excluded.
 - `testing`: integration branch for candidate fixes, including free-mouse work.
   Passing automated tests alone does not qualify a candidate for `stable`.
-- `fix/*`: focused changes for review and upstream pull requests. Keep these
-  independent of fork-only documentation and unrelated fixes.
+- `codex/fix-*` and existing `fix/*`: focused changes for review and upstream pull
+  requests. Keep these independent of fork-only documentation and unrelated fixes.
+  `codex/fix-controller-pause` builds on `codex/fix-mouse-release-order` because
+  both use the ordered mouse-button dispatcher.
 - `test/caps-lock-window-cleanup`: historical integration branch, retained as a
   reference. New integration work goes to `testing`.
 
@@ -45,11 +47,17 @@ python3 tests/free-mouse-motion/run.py
 python3 tests/database-open-failure/run.py
 python3 tests/stale-connection-start/run.py
 python3 tests/usb-startup-timeout/run.py
+python3 tests/mouse-button-release/run.py
+python3 tests/controller-pause/run.py
+python3 tests/mouse-aux-buttons/run.py --require-ownership
 ```
 
 The database suite uses temporary SQLite stores; the lifecycle and USB suites
 use controlled callbacks and helper processes. These cover failure timing and
 cleanup without touching the installed app, saved hosts, or physical devices.
+The input suites replay production handlers with controlled queue backlogs,
+capture changes, controller states, and auxiliary-button counts. They also check
+that ordinary input and shared-device ownership remain intact.
 Real stream reconnects, pointer behavior, and USB forwarding still require
 manual validation before promotion.
 
