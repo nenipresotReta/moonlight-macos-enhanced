@@ -678,6 +678,7 @@ static CVReturn displayLinkOutputCallback(CVDisplayLinkRef displayLink,
 - (void)releaseAllPressedMouseButtons {
     @synchronized (self) {
         self.mouseButtonInputGeneration += 1;
+        [self releaseControllerMouseButtons];
         // A cancelled synchronized press may have recorded a position before
         // delivery. Do not deduplicate the next capture against that position.
         @synchronized (self.inputDiagnosticsLock) {
