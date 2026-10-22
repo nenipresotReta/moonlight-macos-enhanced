@@ -42,7 +42,16 @@ python3 tests/window-cleanup/run.py
 python3 tests/startup-endpoint/run.py
 # On testing when present:
 python3 tests/free-mouse-motion/run.py
+python3 tests/database-open-failure/run.py
+python3 tests/stale-connection-start/run.py
+python3 tests/usb-startup-timeout/run.py
 ```
+
+The database suite uses temporary SQLite stores; the lifecycle and USB suites
+use controlled callbacks and helper processes. These cover failure timing and
+cleanup without touching the installed app, saved hosts, or physical devices.
+Real stream reconnects, pointer behavior, and USB forwarding still require
+manual validation before promotion.
 
 Open upstream contributions: [Caps Lock #68](https://github.com/skyhua0224/moonlight-macos-enhanced/pull/68),
 [window cleanup #69](https://github.com/skyhua0224/moonlight-macos-enhanced/pull/69),
