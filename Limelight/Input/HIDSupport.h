@@ -98,6 +98,9 @@ typedef void (^HIDFreeMouseAbsoluteSyncHandler)(void);
 - (BOOL)getFreeMouseVirtualCursorPoint:(NSPoint *)viewPoint
                          referenceSize:(NSSize *)referenceSize
                                 motion:(NSPoint *)motion;
+// Returns YES when the hybrid path handled or intentionally suppressed the event.
+- (BOOL)handleAppKitFreeMouseMotionAtViewPoint:(NSPoint)viewPoint
+                              referenceSize:(NSSize)referenceSize;
 - (void)sendAbsoluteMousePositionForViewPoint:(NSPoint)viewPoint
                                 referenceSize:(NSSize)referenceSize
                                 clampToBounds:(BOOL)clampToBounds;

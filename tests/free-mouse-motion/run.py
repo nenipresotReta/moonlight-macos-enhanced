@@ -9,7 +9,7 @@ import tempfile
 root = Path(__file__).resolve().parents[2]
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument('--source-ref', help='Read production code from a Git ref (for fail-before checks)')
-parser.add_argument('--case', choices=['motion', 'queue', 'isolation', 'concurrent', 'handoff', 'mode'])
+parser.add_argument('--case', choices=['motion', 'queue', 'isolation', 'concurrent', 'handoff', 'mode', 'takeover'])
 options = parser.parse_args()
 
 
@@ -107,3 +107,4 @@ if __name__ == '__main__':
 
     if not options.source_ref and not options.case:
         subprocess.run([sys.executable, str(Path(__file__).with_name('handoff.py'))], check=True)
+        subprocess.run([sys.executable, str(Path(__file__).with_name('takeover.py'))], check=True)

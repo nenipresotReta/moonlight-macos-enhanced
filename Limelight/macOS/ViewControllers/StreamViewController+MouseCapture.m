@@ -1244,15 +1244,28 @@ static inline NSPoint MLClampFreeMousePointToExitEdge(NSPoint point,
     }
 
     if (![self.hidSupport hasRecentCoreHIDMouseMovement]) {
-        // AppKit takes over when the raw device is idle (for example, a trackpad).
-        // Preserve that position as the next raw anchor instead of reviving an
-        // old virtual trajectory when the external mouse starts moving again.
-        [self.hidSupport sendAbsoluteMousePositionForViewPoint:currentPoint
-                                              referenceSize:self.view.bounds.size clampToBounds:YES];
+        // AppKit takeover is sent by dispatchFreeMouseMotionEvent after the
+        // capture/menu/edge checks. Sending here would also let this event
+        // fall through to HIDSupport's relative fallback.
         return;
     }
     [self.hidSupport seedFreeMouseVirtualCursorWithViewPoint:currentPoint
                                                referenceSize:self.view.bounds.size];
+}
+
+- (void)dispatchFreeMouseMotionEvent:(NSEvent *)event {
+    if (self.isRemoteDesktopMode && self.isMouseCaptured &&
+        [self.hidSupport shouldUseCoreHIDFreeMouseAbsoluteSyncForCurrentConfiguration]) {
+        if (![self canCaptureMouseNow] || self.edgeMenuTemporaryReleaseActive ||
+            self.edgeMenuDragging || self.edgeMenuMenuVisible) {
+            return;
+        }
+        if ([self.hidSupport handleAppKitFreeMouseMotionAtViewPoint:[self currentMouseLocationInViewCoordinates]
+                                                   referenceSize:self.view.bounds.size]) {
+            return;
+        }
+    }
+    [self.hidSupport mouseMoved:event];
 }
 
 - (void)synchronizeCoreHIDFreeMousePointer {
@@ -2462,7 +2475,7 @@ static inline NSPoint MLClampFreeMousePointToExitEdge(NSPoint point,
                                      reason:@"free-mouse-edge-mouse-moved"];
         return;
     }
-    [self.hidSupport mouseMoved:event];
+    [self dispatchFreeMouseMotionEvent:event];
 }
 
 - (void)mouseDragged:(NSEvent *)event {
@@ -2492,7 +2505,7 @@ static inline NSPoint MLClampFreeMousePointToExitEdge(NSPoint point,
                                      reason:@"free-mouse-edge-mouse-dragged"];
         return;
     }
-    [self.hidSupport mouseMoved:event];
+    [self dispatchFreeMouseMotionEvent:event];
 }
 
 - (void)rightMouseDragged:(NSEvent *)event {
@@ -2522,7 +2535,7 @@ static inline NSPoint MLClampFreeMousePointToExitEdge(NSPoint point,
                                      reason:@"free-mouse-edge-right-dragged"];
         return;
     }
-    [self.hidSupport mouseMoved:event];
+    [self dispatchFreeMouseMotionEvent:event];
 }
 
 - (void)otherMouseDragged:(NSEvent *)event {
@@ -2552,7 +2565,7 @@ static inline NSPoint MLClampFreeMousePointToExitEdge(NSPoint point,
                                      reason:@"free-mouse-edge-other-dragged"];
         return;
     }
-    [self.hidSupport mouseMoved:event];
+    [self dispatchFreeMouseMotionEvent:event];
 }
 
 - (void)scrollWheel:(NSEvent *)event {

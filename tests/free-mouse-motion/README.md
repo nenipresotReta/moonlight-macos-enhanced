@@ -72,3 +72,34 @@ stream, focus changes, resize/fullscreen transitions and locked mouse mode.
 Also switch Desktop Sync → Automatic while captured, use a trackpad after the
 external mouse becomes idle, and cross each edge on mixed-scale displays. Check
 that native cursor alignment does not suppress clicks or scroll events.
+
+## AppKit takeover event-chain regression checks
+
+The default runner also executes `takeover.py`. It replays each production
+`mouseMoved`, `mouseDragged`, `rightMouseDragged` and `otherMouseDragged` route
+through anchor reconciliation, final movement admission, and the actual HID
+absolute/relative dispatch methods. A fake raw driver supplies elapsed movement
+time to the production 250 ms recency predicate. One idle-device AppKit event
+must emit exactly one absolute position and no relative delta; the next raw
+report must continue from that position.
+
+The tests also cover raw reports immediately before and after takeover admission,
+queued packet ordering, disabled input, inactive capture, precision-touchpad
+suppression, invalid context, capture/menu blockers, and consumed event routes
+with and without an existing anchor. Desktop Sync, locked mouse, GameController,
+CoreHID failure, non-CoreHID fallback and touchscreen absolute override retain
+their original routing. Native windows, capture-policy decisions and consumed
+route decisions are controlled fakes; these checks do not test actual AppKit
+scheduling or physical device coexistence.
+
+The duplicate-dispatch regression must fail against the pre-fix testing commit:
+
+```sh
+python3 tests/free-mouse-motion/takeover.py --source-ref f59af61 --case takeover
+```
+
+That revision sends absolute x=110 followed by relative x=10 for a single AppKit
+movement from x=100 to x=110 (absolute coordinates are scaled by eight on the
+wire). The regression requires only the absolute packet. Anchor reconciliation
+alone must have no transmission or anchor mutation when the raw device is idle;
+movement is admitted after the outer capture and event-consumption checks.

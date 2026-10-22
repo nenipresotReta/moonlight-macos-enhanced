@@ -778,6 +778,33 @@ static CVReturn displayLinkOutputCallback(CVDisplayLinkRef displayLink,
     }
 }
 
+- (BOOL)handleAppKitFreeMouseMotionAtViewPoint:(NSPoint)viewPoint
+                              referenceSize:(NSSize)referenceSize {
+    @synchronized (self.freeMouseVirtualCursorLock) {
+        NSInteger touchscreenMode = [SettingsClass touchscreenModeFor:self.host.uuid];
+        if (!HIDShouldUseCoreHIDFreeMouseAbsoluteSync(self) ||
+            HIDShouldUseAbsolutePointerPath(self, touchscreenMode)) {
+            return NO;
+        }
+
+        // Recheck ownership while holding the raw integration lock. A raw report
+        // may have arrived after AppKit queued this event; it must not be rewound
+        // or followed by a second, relative movement from the same event.
+        if (!self.shouldSendInputEvents || !self.freeMouseVirtualCursorRequestedActive ||
+            [self.precisionTouchpad shouldSuppressPointerMotion] ||
+            [self hasRecentCoreHIDMouseMovement]) {
+            return YES;
+        }
+
+        // AppKit now owns the trajectory. Reseed and submit one absolute packet
+        // together so the next raw delta continues from this system position.
+        [self sendAbsoluteMousePositionForViewPoint:viewPoint
+                                      referenceSize:referenceSize
+                                      clampToBounds:YES];
+        return YES;
+    }
+}
+
 - (void)sendAbsoluteMousePositionForViewPoint:(NSPoint)viewPoint
                                 referenceSize:(NSSize)referenceSize
                                 clampToBounds:(BOOL)clampToBounds {
