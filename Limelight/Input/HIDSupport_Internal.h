@@ -149,8 +149,6 @@
 @property (nonatomic) uint64_t gcMouseScrollLastEventMsY;
 @property (atomic) uint64_t suppressAppKitScrollUntilMsY;
 
-- (uint32_t)gcMousePressedButtons;
-- (uint32_t)clearGCMousePressedButtons;
 - (void)sendControllerEvent;
 - (void)updateGamepadMenuGesture;
 - (void)setGamepadMouseModeActive:(BOOL)active;
@@ -224,6 +222,8 @@
 @end
 
 @interface HIDSupport (PointerInternal)
+- (uint32_t)gcMousePressedButtons;
+- (uint32_t)clearGCMousePressedButtons;
 - (void)registerMouseCallbacks:(GCMouse *)mouse API_AVAILABLE(macos(11.0));
 - (void)unregisterMouseCallbacks:(GCMouse *)mouse API_AVAILABLE(macos(11.0));
 - (BOOL)initializeDisplayLink;
