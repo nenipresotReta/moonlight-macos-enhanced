@@ -43,3 +43,8 @@ No hardware, network session, or running application is touched. These tests do
 not exercise GameController discovery, physical device delivery, display-link
 scheduling, or scroll processing beyond the callback's existing forwarding
 contract. Extra auxiliary buttons remain unmapped, matching existing behavior.
+
+The fixture also supports `--release-regressions`, exposed by
+`tests/gcmouse-button-release/run.py`. Both modes use the real queued button
+dispatcher and capture/context setters. Window-cleanup ownership tests reuse
+this fixture to avoid maintaining a second stubbed GCMouse sender.
