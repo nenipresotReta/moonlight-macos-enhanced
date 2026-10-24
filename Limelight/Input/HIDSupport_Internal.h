@@ -26,6 +26,7 @@
 @import GameController;
 
 @class HIDAbsolutePointerBatch;
+@class HIDGCMouseButtonState;
 
 @interface HIDSupport () <CoreHIDMouseDriverDelegate>
 @property (nonatomic) unsigned short authoredRumbleLow;
@@ -83,6 +84,8 @@
 @property (nonatomic) id mouseDisconnectObserver;
 
 @property (nonatomic) BOOL useGCMouse;
+// Registrations and held-button state are protected by @synchronized(self).
+@property (nonatomic, strong) NSMapTable<GCMouse *, HIDGCMouseButtonState *> *gcMouseButtonStates;
 @property (nonatomic) BOOL useCoreHIDMouse;
 @property (nonatomic, strong) CoreHIDMouseDriver *coreHIDMouseDriver;
 @property (nonatomic) BOOL coreHIDMouseDidDeliverMovement;
@@ -146,6 +149,8 @@
 @property (nonatomic) uint64_t gcMouseScrollLastEventMsY;
 @property (atomic) uint64_t suppressAppKitScrollUntilMsY;
 
+- (uint32_t)gcMousePressedButtons;
+- (uint32_t)clearGCMousePressedButtons;
 - (void)sendControllerEvent;
 - (void)updateGamepadMenuGesture;
 - (void)setGamepadMouseModeActive:(BOOL)active;

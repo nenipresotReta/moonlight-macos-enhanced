@@ -128,6 +128,8 @@ static BOOL HIDAbsoluteMousePayloadForEvent(NSEvent *e, BOOL c, short *x, short 
 }
 /* HELPERS */
 @implementation HIDSupport
+- (uint32_t)gcMousePressedButtons { return 0; }
+- (uint32_t)clearGCMousePressedButtons { return 0; }
 // Controller mouse emulation is exercised by tests/controller-pause.
 - (void)releaseControllerMouseButtons {}
 - (void)updateControllerMouseButtonsWithRouting:(uint64_t)routing {}

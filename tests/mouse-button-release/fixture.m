@@ -81,6 +81,8 @@ static void LiSendMultiControllerEventCtx(InputContext *ctx, int p, int m, int b
 @end
 /* HELPERS */
 @implementation HIDSupport
+- (uint32_t)gcMousePressedButtons { return 0; }
+- (uint32_t)clearGCMousePressedButtons { return 0; }
 // Controller mouse emulation is covered by tests/controller-pause. These hooks
 // isolate that external sender from the physical-mouse fixture.
 - (void)releaseControllerMouseButtons {}

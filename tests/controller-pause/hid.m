@@ -70,6 +70,8 @@ static BOOL HIDValidateInputContext(Context *p,const char *unused) { return p &&
 static void HIDDispatchInput(HIDSupport *s,Context *p,dispatch_block_t block) { dispatch_async(s.inputQueue,block); }
 /* DISPATCH */
 @implementation HIDSupport
+- (uint32_t)gcMousePressedButtons { return 0; }
+- (uint32_t)clearGCMousePressedButtons { return 0; }
 @synthesize shouldSendInputEvents=_shouldSendInputEvents;
 @synthesize inputContext=_inputContext;
 - (instancetype)init { self=[super init]; self.inputDiagnosticsLock=[NSObject new];self.controller=[Controller new];self.controller.isMouseMode=YES; self.inputContext=&context;self.inputQueue=dispatch_queue_create("controller-pause-fixture",DISPATCH_QUEUE_SERIAL);return self; }

@@ -10,6 +10,15 @@
 static CGFloat const HIDGCMouseRelativeSpeedDivisor = 2.5;
 static CGFloat const HIDCoreHIDFreeMouseBaselineScale = 0.75;
 
+// One registration owns its held buttons. Invalidating it also rejects callbacks
+// that GameController had already copied before a disconnect or owner change.
+@interface HIDGCMouseButtonState : NSObject
+@property (nonatomic) BOOL active;
+@property (nonatomic) uint32_t pressedMask;
+@end
+@implementation HIDGCMouseButtonState
+@end
+
 // GCMouse instances are shared across streams. A previous support instance may
 // finish tearing down after another one has replaced its callbacks.
 static NSMapTable<GCMouse *, HIDSupport *> *HIDGCMouseCallbackOwners(void) {
@@ -360,71 +369,122 @@ static BOOL HIDAbsolutePointerBatchMatches(HIDAbsolutePointerBatch *batch,
     return YES;
 }
 
+// All button state and submissions use the same monitor as capture/context changes.
+- (uint32_t)gcMousePressedButtons {
+    @synchronized (self) {
+        uint32_t mask = 0;
+        for (HIDGCMouseButtonState *state in self.gcMouseButtonStates.objectEnumerator) {
+            mask |= state.pressedMask;
+        }
+        return mask;
+    }
+}
+
+- (uint32_t)clearGCMousePressedButtons {
+    @synchronized (self) {
+        uint32_t mask = [self gcMousePressedButtons];
+        for (HIDGCMouseButtonState *state in self.gcMouseButtonStates.objectEnumerator) {
+            state.pressedMask = 0;
+        }
+        return mask;
+    }
+}
+
+- (void)handleGCMouseButton:(int)button pressed:(BOOL)pressed state:(HIDGCMouseButtonState *)state {
+    @synchronized (self) {
+        if (!state.active || !self.useGCMouse || !self.shouldSendInputEvents) return;
+        uint32_t bit = HIDMouseButtonBitForButton(button);
+        BOOL wasPressed = (state.pressedMask & bit) != 0;
+        if (button == BUTTON_LEFT || button == BUTTON_RIGHT) {
+            BOOL consumed = [self.precisionTouchpad consumeMouseButton:button pressed:pressed];
+            // A touchpad mode change must not swallow release of a forwarded press.
+            if (consumed && (pressed || !wasPressed)) return;
+        }
+        if (wasPressed == pressed) return;
+        PML_INPUT_STREAM_CONTEXT input = HIDInputContext(self);
+        if (!HIDValidateInputContext(input, "gc-mouse-button")) return;
+        uint32_t before = [self gcMousePressedButtons];
+        if (pressed) state.pressedMask |= bit;
+        else state.pressedMask &= ~bit;
+        uint32_t after = [self gcMousePressedButtons];
+        // Two physical mice may hold the same host button. Release only the last.
+        if ((before & bit) == (after & bit)) return;
+        @synchronized (self.inputDiagnosticsLock) {
+            self.pendingAbsolutePointerBatch = nil;
+            HIDDispatchMouseButtonInput(self, input, pressed, ^{
+                LiSendMouseButtonEventCtx(input, pressed ? BUTTON_ACTION_PRESS : BUTTON_ACTION_RELEASE, button);
+            });
+        }
+    }
+}
+
+- (void)releaseGCMouseButtonsForMouse:(GCMouse *)mouse {
+    @synchronized (self) {
+        HIDGCMouseButtonState *state = [self.gcMouseButtonStates objectForKey:mouse];
+        if (state == nil) return;
+        uint32_t before = [self gcMousePressedButtons];
+        state.active = NO;
+        state.pressedMask = 0;
+        [self.gcMouseButtonStates removeObjectForKey:mouse];
+        uint32_t released = before & ~[self gcMousePressedButtons] & ~self.pressedMouseButtonsMask;
+        if (released == 0) return;
+        PML_INPUT_STREAM_CONTEXT input = HIDInputContext(self);
+        if (!HIDValidateInputContext(input, "gc-mouse-disconnect")) return;
+        @synchronized (self.inputDiagnosticsLock) {
+            self.pendingAbsolutePointerBatch = nil;
+            const int buttons[] = { BUTTON_LEFT, BUTTON_MIDDLE, BUTTON_RIGHT, BUTTON_X1, BUTTON_X2 };
+            for (NSUInteger index = 0; index < sizeof(buttons) / sizeof(buttons[0]); index++) {
+                int button = buttons[index];
+                if (!(released & HIDMouseButtonBitForButton(button))) continue;
+                // Share the queue with admitted presses, even when input is paused.
+                HIDDispatchMouseButtonInput(self, input, NO, ^{
+                    LiSendMouseButtonEventCtx(input, BUTTON_ACTION_RELEASE, button);
+                });
+            }
+        }
+    }
+}
+
 -(void)registerMouseCallbacks:(GCMouse *)mouse API_AVAILABLE(macos(11.0)) {
     NSMapTable<GCMouse *, HIDSupport *> *owners = HIDGCMouseCallbackOwners();
     @synchronized (owners) {
+        // Registration/teardown take owners -> support. Input delivery never
+        // takes owners, so capture cleanup cannot invert this lock order.
+        HIDSupport *previous = [owners objectForKey:mouse];
+        [previous releaseGCMouseButtonsForMouse:mouse];
         [owners setObject:self forKey:mouse];
+        HIDGCMouseButtonState *state = [HIDGCMouseButtonState new];
+        @synchronized (self) {
+            if (self.gcMouseButtonStates == nil) {
+                self.gcMouseButtonStates = [NSMapTable strongToStrongObjectsMapTable];
+            }
+            state.active = self.useGCMouse;
+            [self.gcMouseButtonStates setObject:state forKey:mouse];
+        }
         if (self.useGCMouse) {
             mouse.mouseInput.mouseMovedHandler = ^(GCMouseInput * _Nonnull mouse, float deltaX, float deltaY) {
                 self.mouseDeltaX += deltaX;
                 self.mouseDeltaY -= deltaY;
             };
         
-            mouse.mouseInput.leftButton.pressedChangedHandler = ^(GCControllerButtonInput * _Nonnull button, float value, BOOL pressed) {
-                if ([self.precisionTouchpad consumeMouseButton:BUTTON_LEFT pressed:pressed]) {
-                    return;
-                }
-                if (self.shouldSendInputEvents) {
-                    PML_INPUT_STREAM_CONTEXT inputCtx = HIDInputContext(self);
-                    if (!inputCtx) {
-                        return;
-                    }
-                    LiSendMouseButtonEventCtx(inputCtx, pressed ? BUTTON_ACTION_PRESS : BUTTON_ACTION_RELEASE, BUTTON_LEFT);
-                }
+            mouse.mouseInput.leftButton.pressedChangedHandler = ^(GCControllerButtonInput *button, float value, BOOL pressed) {
+                [self handleGCMouseButton:BUTTON_LEFT pressed:pressed state:state];
             };
-            mouse.mouseInput.middleButton.pressedChangedHandler = ^(GCControllerButtonInput * _Nonnull button, float value, BOOL pressed) {
-                if (self.shouldSendInputEvents) {
-                    PML_INPUT_STREAM_CONTEXT inputCtx = HIDInputContext(self);
-                    if (!inputCtx) {
-                        return;
-                    }
-                    LiSendMouseButtonEventCtx(inputCtx, pressed ? BUTTON_ACTION_PRESS : BUTTON_ACTION_RELEASE, BUTTON_MIDDLE);
-                }
+            mouse.mouseInput.middleButton.pressedChangedHandler = ^(GCControllerButtonInput *button, float value, BOOL pressed) {
+                [self handleGCMouseButton:BUTTON_MIDDLE pressed:pressed state:state];
             };
-            mouse.mouseInput.rightButton.pressedChangedHandler = ^(GCControllerButtonInput * _Nonnull button, float value, BOOL pressed) {
-                if ([self.precisionTouchpad consumeMouseButton:BUTTON_RIGHT pressed:pressed]) {
-                    return;
-                }
-                if (self.shouldSendInputEvents) {
-                    PML_INPUT_STREAM_CONTEXT inputCtx = HIDInputContext(self);
-                    if (!inputCtx) {
-                        return;
-                    }
-                    LiSendMouseButtonEventCtx(inputCtx, pressed ? BUTTON_ACTION_PRESS : BUTTON_ACTION_RELEASE, BUTTON_RIGHT);
-                }
+            mouse.mouseInput.rightButton.pressedChangedHandler = ^(GCControllerButtonInput *button, float value, BOOL pressed) {
+                [self handleGCMouseButton:BUTTON_RIGHT pressed:pressed state:state];
             };
-        
             NSArray<GCControllerButtonInput *> *auxiliaryButtons = mouse.mouseInput.auxiliaryButtons;
             if (auxiliaryButtons.count > 0) {
-                auxiliaryButtons[0].pressedChangedHandler = ^(GCControllerButtonInput * _Nonnull button, float value, BOOL pressed) {
-                    if (self.shouldSendInputEvents) {
-                        PML_INPUT_STREAM_CONTEXT inputCtx = HIDInputContext(self);
-                        if (!inputCtx) {
-                            return;
-                        }
-                        LiSendMouseButtonEventCtx(inputCtx, pressed ? BUTTON_ACTION_PRESS : BUTTON_ACTION_RELEASE, BUTTON_X1);
-                    }
+                auxiliaryButtons[0].pressedChangedHandler = ^(GCControllerButtonInput *button, float value, BOOL pressed) {
+                    [self handleGCMouseButton:BUTTON_X1 pressed:pressed state:state];
                 };
             }
             if (auxiliaryButtons.count > 1) {
-                auxiliaryButtons[1].pressedChangedHandler = ^(GCControllerButtonInput * _Nonnull button, float value, BOOL pressed) {
-                    if (self.shouldSendInputEvents) {
-                        PML_INPUT_STREAM_CONTEXT inputCtx = HIDInputContext(self);
-                        if (!inputCtx) {
-                            return;
-                        }
-                        LiSendMouseButtonEventCtx(inputCtx, pressed ? BUTTON_ACTION_PRESS : BUTTON_ACTION_RELEASE, BUTTON_X2);
-                    }
+                auxiliaryButtons[1].pressedChangedHandler = ^(GCControllerButtonInput *button, float value, BOOL pressed) {
+                    [self handleGCMouseButton:BUTTON_X2 pressed:pressed state:state];
                 };
             }
         } else {
@@ -458,6 +518,7 @@ static BOOL HIDAbsolutePointerBatchMatches(HIDAbsolutePointerBatch *batch,
         if ([owners objectForKey:mouse] != self) {
             return;
         }
+        [self releaseGCMouseButtonsForMouse:mouse];
         [owners removeObjectForKey:mouse];
         mouse.mouseInput.mouseMovedHandler = nil;
     
@@ -618,7 +679,7 @@ static CVReturn displayLinkOutputCallback(CVDisplayLinkRef displayLink,
 
 - (BOOL)hasPressedMouseButtons {
     @synchronized (self) {
-        return self.pressedMouseButtonsMask != 0;
+        return (self.pressedMouseButtonsMask | [self gcMousePressedButtons]) != 0;
     }
 }
 
@@ -636,7 +697,7 @@ static CVReturn displayLinkOutputCallback(CVDisplayLinkRef displayLink,
             // A concurrent raw report must not create a coalescible batch in
             // between those operations and move past this release boundary.
             [self releaseControllerMouseButtons];
-            uint32_t pressedMask = self.pressedMouseButtonsMask;
+            uint32_t pressedMask = self.pressedMouseButtonsMask | [self clearGCMousePressedButtons];
             if (pressedMask == 0) {
                 return;
             }

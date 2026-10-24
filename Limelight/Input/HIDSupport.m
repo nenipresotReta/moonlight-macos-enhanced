@@ -505,6 +505,7 @@ static short HIDVirtualKeyForTypedCharacter(UniChar character) {
             self.mouseButtonInputGeneration += 1;
             self.mouseButtonContextGeneration += 1;
             self.pressedMouseButtonsMask = 0;
+            [self clearGCMousePressedButtons];
             @synchronized (self.inputDiagnosticsLock) {
                 self.pendingAbsolutePointerBatch = nil;
                 self.lastSubmittedAbsolutePointerBatch = nil;
