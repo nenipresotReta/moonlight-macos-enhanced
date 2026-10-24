@@ -50,6 +50,7 @@ python3 tests/usb-startup-timeout/run.py
 python3 tests/mouse-button-release/run.py
 python3 tests/controller-pause/run.py
 python3 tests/mouse-aux-buttons/run.py --require-ownership
+python3 tests/gcmouse-button-release/run.py
 ```
 
 The database suite uses temporary SQLite stores; the lifecycle and USB suites
